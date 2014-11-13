@@ -6,6 +6,7 @@ import urwid
 class BigTextDisplay:
 
 	palette = [
+		('edit', 'black', 'light gray'),
         ('header',       'white',      'dark red',   'bold'),
     ('bigtext', 'white', 'black'),]
 
@@ -36,16 +37,20 @@ class BigTextDisplay:
 		frame = urwid.Frame(header=hdr, body=btwp, footer=ftr)
 
 
-		bt2 = urwid.BigText('oh...hai!', font=urwid.font.HalfBlock5x4Font())
-		btwp2 = urwid.Padding(bt2, "center", 'clip')
 
-		btwp2 = urwid.Filler(btwp2, 'middle', None, 7)
+		div = urwid.Divider()
+		txt = urwid.Text(u"    Hello World",align='left')
+		ed = urwid.Edit(caption="    Text Here:  ")
+		ed = urwid.AttrMap(ed, 'edit')
+
+		pile = urwid.Pile([ed,div,ed,div,ed])
+		fill = urwid.Filler(pile, 'middle')
 
 		hdr2 = urwid.Text("University of Southampton Linux Installer")
 		hdr2 = urwid.AttrWrap(hdr2, 'header')
 		ftr2 = urwid.Text("bonemeal 0.1")
 		ftr2 = urwid.AttrWrap(ftr2, 'header')
-		frame2 = urwid.Frame(header=hdr2, body=btwp2, footer=ftr2)
+		frame2 = urwid.Frame(header=hdr2, body=fill, footer=ftr2)
 
 		return frame, frame2
 
