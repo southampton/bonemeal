@@ -40,17 +40,16 @@ class BigTextDisplay:
 		ftr = urwid.AttrWrap(ftr, 'header')
 		frame = urwid.Frame(header=hdr, body=pile1, footer=ftr)
 
-
-		txt = urwid.Text(u"    Hello World",align='left')
+		htxt = urwid.Text(u" Welcome to the RHEL post-installation setup.",align='left')
 		ed = urwid.Edit(caption=('header',"    UOS Number:  "))
 		ed = urwid.AttrMap(ed, 'edit')
 		ed2 = urwid.Edit(caption=('header',"    Department:  "))
 		ed2 = urwid.AttrMap(ed2, 'edit')
-		ed3 = urwid.Edit(caption=('header',"    Username:  "))
+		ed3 = urwid.Edit(caption=('header',"      Username:  "))
 		ed3 = urwid.AttrMap(ed3, 'edit')
 
-		pile = urwid.Pile([ed,div,ed2,div,ed3])
-		fill = urwid.Filler(pile, 'middle')
+		pile = urwid.Pile([div,htxt,div,ed,div,ed2,div,ed3])
+		fill = urwid.Filler(pile, 'top')
 
 		frame2 = urwid.Frame(header=hdr, body=fill, footer=ftr)
 
