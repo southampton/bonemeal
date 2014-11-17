@@ -25,32 +25,34 @@ class BigTextDisplay:
 		
 	def setup_view(self):
 
+		div = urwid.Divider()
+
 		bt = urwid.BigText('I am ready to build', font=urwid.font.HalfBlock5x4Font())
 		btwp = urwid.Padding(bt, "center", 'clip')
 
-		btwp = urwid.Filler(btwp, 'middle', None, 7)
+		txt = urwid.Text(u"Press any key to get started",align='center')
+		pile1 = urwid.Pile([btwp,div,txt])
+		pile1 = urwid.Filler(pile1, 'middle', None, 7)
 
 		hdr = urwid.Text("University of Southampton Linux Installer")
 		hdr = urwid.AttrWrap(hdr, 'header')
 		ftr = urwid.Text("bonemeal 0.1")
 		ftr = urwid.AttrWrap(ftr, 'header')
-		frame = urwid.Frame(header=hdr, body=btwp, footer=ftr)
+		frame = urwid.Frame(header=hdr, body=pile1, footer=ftr)
 
 
-
-		div = urwid.Divider()
 		txt = urwid.Text(u"    Hello World",align='left')
-		ed = urwid.Edit(caption="    Text Here:  ")
+		ed = urwid.Edit(caption=('header',"    UOS Number:  "))
 		ed = urwid.AttrMap(ed, 'edit')
+		ed2 = urwid.Edit(caption=('header',"    Department:  "))
+		ed2 = urwid.AttrMap(ed2, 'edit')
+		ed3 = urwid.Edit(caption=('header',"    Username:  "))
+		ed3 = urwid.AttrMap(ed3, 'edit')
 
-		pile = urwid.Pile([ed,div,ed,div,ed])
+		pile = urwid.Pile([ed,div,ed2,div,ed3])
 		fill = urwid.Filler(pile, 'middle')
 
-		hdr2 = urwid.Text("University of Southampton Linux Installer")
-		hdr2 = urwid.AttrWrap(hdr2, 'header')
-		ftr2 = urwid.Text("bonemeal 0.1")
-		ftr2 = urwid.AttrWrap(ftr2, 'header')
-		frame2 = urwid.Frame(header=hdr2, body=fill, footer=ftr2)
+		frame2 = urwid.Frame(header=hdr, body=fill, footer=ftr)
 
 		return frame, frame2
 
