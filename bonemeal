@@ -65,7 +65,7 @@ class BigTextDisplay:
 		ftr = urwid.AttrWrap(ftr, 'header')
 		frame = urwid.Frame(header=hdr, body=pile1, footer=ftr)
 
-		htxt = urwid.Text(u" Welcome to the RHEL post-installation setup.",align='left')
+		htxt = urwid.Text(u" Welcome to the Linux setup wizard. Please enter the following information. Use the arrow keys to move between fields.",align='left')
 		tag = self.get_asset_tag()
 		print tag
 		ed = urwid.Edit(caption=('header',"    UOS Number:  "),edit_text=tag)
@@ -75,7 +75,15 @@ class BigTextDisplay:
 		ed3 = urwid.Edit(caption=('header',"    User/Owner:  "))
 		ed3 = urwid.AttrMap(ed3, 'edit')
 
-		pile = urwid.Pile([div,htxt,div,ed,div,ed2,div,ed3])
+		mtxt = urwid.Text(u" Please enter your iSolutions username and password in order to join the domain. Do not use your 'adm' account.",align='left')
+
+
+		ed4 = urwid.Edit(caption=('header'," Your Username:  "))
+		ed4 = urwid.AttrMap(ed4, 'edit')
+		ed5 = urwid.Edit(caption=('header'," Your Password:  "))
+		ed5 = urwid.AttrMap(ed5, 'edit')
+
+		pile = urwid.Pile([div,htxt,div,ed,div,ed2,div,ed3,div,mtxt,div,ed4,div,ed5])
 		fill = urwid.Filler(pile, 'top')
 
 		frame2 = urwid.Frame(header=hdr, body=fill, footer=ftr)
