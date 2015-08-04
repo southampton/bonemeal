@@ -1,0 +1,81 @@
+#!/usr/bin/python
+
+import urwid
+import platform # for get hostname
+
+SETUP_TITLE           = ' Red Hat Enterprise Linux 7 Server Installer';
+PUPPET_MASTER         = 'desktop.puppet.soton.ac.uk';
+PUPPET_MASTER_CA_CERT = '/mnt/build/ssl/desktop.puppet.soton.ac.uk.pem';
+PUPPET_SSL_ROOT       = '/var/lib/puppet/ssl';
+SETUP_VERSION         = '2015-08-04-01';
+	
+class BigTextDisplay:
+
+	palette = [
+		('edit', 'black', 'light gray'),
+        ('header',       'white',      'dark red',   'bold'),
+        ('label',       'white',      'dark blue',   'bold'),
+		('bg','white','dark blue')
+		]
+
+	def main(self):
+		self.setup_header_footer()
+		self.loop = urwid.MainLoop(self.view_default(), self.palette, unhandled_input=self.unhandled_input)
+		self.loop.run()
+
+	def get_system_hostname(self):
+		name = platform.node()
+		return name
+
+	def unhandled_input(self,key):
+		self.loop.widget = self.view_sethostname()
+		self.loop.draw_screen()
+
+	def setup_header_footer(self):
+		self.header = urwid.Text(SETUP_TITLE)
+		self.header = urwid.AttrWrap(self.header, 'header')
+		self.footer = urwid.Text("bonemeal installer " + SETUP_VERSION)
+		self.footer = urwid.AttrWrap(self.footer, 'header')
+
+	def view_default(self):
+
+		div = urwid.Divider()
+		bt = urwid.BigText('I am ready to build', font=urwid.font.HalfBlock5x4Font())
+		btwp = urwid.Padding(bt, "center", 'clip')
+
+		txt = urwid.Text(u"Press any key to get started",align='center')
+		pile1 = urwid.Pile([btwp,div,txt])
+		pile1 = urwid.Filler(pile1, 'middle', None, 7)
+
+		frame = urwid.Frame(header=self.header, body=pile1, footer=self.footer)
+		return urwid.AttrMap(frame, 'bg')
+		
+	def view_sethostname(self):
+
+		div = urwid.Divider()
+		hdr = urwid.Text(SETUP_TITLE)
+
+		htxt = urwid.Text(u"Welcome to the setup wizard. Please enter the following information. Use the arrow keys to move between fields.",align='left')
+		ed = urwid.Edit( caption=('label',"      Hostname:  "),edit_text=self.get_system_hostname())
+		ed = urwid.AttrMap(ed, 'edit')
+
+		mtxt = urwid.Text(u"Please enter your University username and password in order to register this system.",align='left')
+
+
+		ed4 = urwid.Edit(caption=('label'," Your Username:  "))
+		ed4 = urwid.AttrMap(ed4, 'edit')
+		ed5 = urwid.Edit(caption=('label'," Your Password:  "))
+		ed5 = urwid.AttrMap(ed5, 'edit')
+
+		pile = urwid.Pile([div,htxt,div,ed,div,mtxt,div,ed4,div,ed5])
+		pile = urwid.Padding(pile, "left", left=1,right=1)
+		fill = urwid.Filler(pile, 'top')
+
+		frame2 = urwid.Frame(header=self.header, body=fill, footer=self.footer)
+
+		return urwid.AttrMap(frame2, 'bg')
+
+if '__main__'==__name__:
+	BigTextDisplay().main()
+
+
