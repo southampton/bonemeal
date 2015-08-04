@@ -2,12 +2,16 @@
 
 import urwid
 import platform # for get hostname
+import os # for get network interfaces
 
 SETUP_TITLE           = ' Red Hat Enterprise Linux 7 Server Installer';
 PUPPET_MASTER         = 'desktop.puppet.soton.ac.uk';
 PUPPET_MASTER_CA_CERT = '/mnt/build/ssl/desktop.puppet.soton.ac.uk.pem';
 PUPPET_SSL_ROOT       = '/var/lib/puppet/ssl';
 SETUP_VERSION         = '2015-08-04-01';
+
+## logging framework
+## error handler
 	
 class BigTextDisplay:
 
@@ -18,6 +22,8 @@ class BigTextDisplay:
 		('bg','white','dark blue')
 		]
 
+	start = True
+
 	def main(self):
 		self.setup_header_footer()
 		self.loop = urwid.MainLoop(self.view_default(), self.palette, unhandled_input=self.unhandled_input)
@@ -27,8 +33,26 @@ class BigTextDisplay:
 		name = platform.node()
 		return name
 
+	def get_network_interfaces(self):
+		try:
+			entries = os.listdir("/sys/class/net")
+		except OSError as e:
+			print "TODO fix this\n" # TODO
+
+		try:
+			entries.remove('lo')
+		except ValueError as ex:
+			pass
+
+		return entries
+
 	def unhandled_input(self,key):
-		self.loop.widget = self.view_sethostname()
+		if self.start:
+			self.switch_view(self.view_sethostname())
+			self.start = False
+
+	def switch_view(self,view):
+		self.loop.widget = view
 		self.loop.draw_screen()
 
 	def setup_header_footer(self):
@@ -49,11 +73,49 @@ class BigTextDisplay:
 
 		frame = urwid.Frame(header=self.header, body=pile1, footer=self.footer)
 		return urwid.AttrMap(frame, 'bg')
-		
-	def view_sethostname(self):
+
+	def view_choosenet(self):
+		interfaces = self.get_network_interfaces()
+
+		if len(interfaces) == 1:
+			## set interface to the only one in the list
+			## todo go to next slide
+			pass
+
+		btns = []
+		for name in interfaces:
+			button = urwid.Button(name)
+			urwid.connect_signal(button, 'click', self.handle_interfaces, name)
+			#btns.append(urwid.AttrMap(button, None, focus_map='reversed'))
+			btns.append(button)
+
+		listbox = urwid.ListBox(urwid.SimpleFocusListWalker(btns))
+		listbox = urwid.BoxAdapter(listbox,len(interfaces))
+		# so clayton made me write the max thing. what it does is get the max width/length of the strings in the network list
+		listbox = urwid.Padding(listbox, "left", width=max([len(name) for name in interfaces]) + 4)
 
 		div = urwid.Divider()
-		hdr = urwid.Text(SETUP_TITLE)
+
+		htxt = urwid.Text(u"Please choose a network interface to configure.",align='left')
+
+		pile = urwid.Pile([div,htxt,div,listbox])
+
+		pile = urwid.Padding(pile, "left", left=1,right=1)
+		fill = urwid.Filler(pile, 'top')
+
+		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
+		return urwid.AttrMap(frame, 'bg')
+
+	def handle_interfaces(self,button,chosen_interface):
+		pass
+
+	def handle_hostname(self,button):
+		self.hostname = self.hostname_edit.get_edit_text()
+		self.switch_view(self.view_choosenet())
+
+	def view_auth(self):
+
+		div = urwid.Divider()
 
 		htxt = urwid.Text(u"Welcome to the setup wizard. Please enter the following information. Use the arrow keys to move between fields.",align='left')
 		ed = urwid.Edit( caption=('label',"      Hostname:  "),edit_text=self.get_system_hostname())
@@ -71,11 +133,29 @@ class BigTextDisplay:
 		pile = urwid.Padding(pile, "left", left=1,right=1)
 		fill = urwid.Filler(pile, 'top')
 
-		frame2 = urwid.Frame(header=self.header, body=fill, footer=self.footer)
+		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
 
-		return urwid.AttrMap(frame2, 'bg')
+		return urwid.AttrMap(frame, 'bg')
+		
+	def view_sethostname(self):
+		div = urwid.Divider()
+
+		htxt = urwid.Text(u"Welcome to the setup wizard. Please enter the following information. Use the arrow keys to move between fields.",align='left')
+
+		self.hostname_edit = urwid.Edit( caption=('label',"      Hostname:  "),edit_text=self.get_system_hostname())
+		ed = urwid.AttrMap(self.hostname_edit, 'edit')
+
+		button = urwid.Button("Continue")
+		urwid.connect_signal(button, 'click', self.handle_hostname)
+		button = urwid.Padding(button,"center", width=12)
+
+		pile = urwid.Pile([div,htxt,div,ed,div,button])
+		pile = urwid.Padding(pile, "left", left=1,right=1)
+		fill = urwid.Filler(pile, 'top')
+		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
+		return urwid.AttrMap(frame, 'bg')
 
 if '__main__'==__name__:
 	BigTextDisplay().main()
-
+	#BigTextDisplay().get_network_interfaces()
 
