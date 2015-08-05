@@ -3,15 +3,27 @@
 import urwid
 import platform # for get hostname
 import os # for get network interfaces
+import socket # for get ip from hostname
+from netaddr import IPAddress, IPNetwork
 
 SETUP_TITLE           = ' Red Hat Enterprise Linux 7 Server Installer';
 PUPPET_MASTER         = 'desktop.puppet.soton.ac.uk';
 PUPPET_MASTER_CA_CERT = '/mnt/build/ssl/desktop.puppet.soton.ac.uk.pem';
 PUPPET_SSL_ROOT       = '/var/lib/puppet/ssl';
-SETUP_VERSION         = '2015-08-04-01';
+SETUP_VERSION         = '2015-08-05-05';
+
+## NETWORK CONFIGS
+NETWORKS_LIST = [IPNetwork("152.78.128.0/22"),IPNetwork("152.78.136.0/22"),IPNetwork("192.168.168.0/22"),IPNetwork("152.78.140.0/23"),IPNetwork("152.78.142.0/23"),IPNetwork("152.78.155.0/24")]
+ROUTERS_MAP = {
+	"152.78.128.0/22":  '152.78.128.17',
+	"152.78.136.0/22":  '152.78.137.254',
+	"192.168.168.0/22": '192.168.171.254',
+	"152.78.140.0/23":  '152.78.141.254',
+	"152.78.142.0/23":  '152.78.143.254',
+	"152.78.155.0/24":  '152.78.155.254',
+}
 
 ## logging framework
-## error handler
 	
 class BigTextDisplay:
 
@@ -19,16 +31,38 @@ class BigTextDisplay:
 		('edit', 'black', 'light gray'),
         ('header',       'white',      'dark red',   'bold'),
         ('label',       'white',      'dark blue',   'bold'),
-		('bg','white','dark blue')
+		('bg','white','dark blue'),
+		('error','yellow','dark blue')
 		]
 
 	start = True
 
+	## core functions
 	def main(self):
 		self.setup_header_footer()
 		self.loop = urwid.MainLoop(self.view_default(), self.palette, unhandled_input=self.unhandled_input)
 		self.loop.run()
 
+	def fatal(self,message):
+		self.view_fatal_error(message)
+
+	def switch_view(self,view):
+		self.loop.widget = view
+		self.loop.draw_screen()
+
+	def setup_header_footer(self):
+		self.header_text = urwid.Text(SETUP_TITLE)
+		self.header = urwid.AttrWrap(self.header_text, 'header')
+		self.footer_text = urwid.Text("bonemeal installer " + SETUP_VERSION)
+		self.footer = urwid.AttrWrap(self.footer_text, 'header')
+
+	def unhandled_input(self,key):
+		if self.start:
+			self.view_sethostname()
+			self.start = False
+
+
+	## functions to lookup data from the local system
 	def get_system_hostname(self):
 		name = platform.node()
 		return name
@@ -37,7 +71,8 @@ class BigTextDisplay:
 		try:
 			entries = os.listdir("/sys/class/net")
 		except OSError as e:
-			print "TODO fix this\n" # TODO
+			self.fatal("Could not obtain the list of local network interfaces: " + str(e))
+			return None
 
 		try:
 			entries.remove('lo')
@@ -46,20 +81,13 @@ class BigTextDisplay:
 
 		return entries
 
-	def unhandled_input(self,key):
-		if self.start:
-			self.switch_view(self.view_sethostname())
-			self.start = False
+	def get_ip_from_hostname(self):
+		try:
+				return socket.gethostbyname(self.hostname)
+		except socket.gaierror as e:
+			return ""
 
-	def switch_view(self,view):
-		self.loop.widget = view
-		self.loop.draw_screen()
-
-	def setup_header_footer(self):
-		self.header = urwid.Text(SETUP_TITLE)
-		self.header = urwid.AttrWrap(self.header, 'header')
-		self.footer = urwid.Text("bonemeal installer " + SETUP_VERSION)
-		self.footer = urwid.AttrWrap(self.footer, 'header')
+	## view functions
 
 	def view_default(self):
 
@@ -77,10 +105,14 @@ class BigTextDisplay:
 	def view_choosenet(self):
 		interfaces = self.get_network_interfaces()
 
+		if interfaces == None:
+			return
+
 		if len(interfaces) == 1:
 			## set interface to the only one in the list
-			## todo go to next slide
-			pass
+			self.netif = chosen_interface
+			self.view_setipaddr()
+			return
 
 		btns = []
 		for name in interfaces:
@@ -104,14 +136,57 @@ class BigTextDisplay:
 		fill = urwid.Filler(pile, 'top')
 
 		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
-		return urwid.AttrMap(frame, 'bg')
+		self.switch_view(urwid.AttrMap(frame, 'bg'))
 
 	def handle_interfaces(self,button,chosen_interface):
-		pass
+		self.netif = chosen_interface
+		self.view_setipaddr()
+
+	def handle_exit(self,button):
+		raise urwid.ExitMainLoop()
 
 	def handle_hostname(self,button):
 		self.hostname = self.hostname_edit.get_edit_text()
-		self.switch_view(self.view_choosenet())
+		if not self.hostname.endswith(".soton.ac.uk"):
+			if not "soton.ac.uk" in self.hostname:
+				if self.hostname.endswith("."):
+					self.hostname = self.hostname + "soton.ac.uk"
+				else:
+					self.hostname = self.hostname + ".soton.ac.uk"
+			else:
+				self.hostname_error.set_text("That hostname is invalid. Please try again.")
+				return
+
+		self.footer_text.set_text(self.hostname)
+		self.view_choosenet()
+
+	def handle_ipaddr(self,button):
+		self.ipaddr = self.ipaddr_edit.get_edit_text()
+
+		## validate the ip address
+		try:
+			address = IPAddress(self.ipaddr)
+		except Exception as ex:
+			self.ipaddr_error.set_text("That IP address is invalid. Please try again.")
+			return
+
+		## Now try to recognise the network it is within
+		found = False
+		for ipnet in NETWORKS_LIST:
+			if address in ipnet:
+				found = True
+				self.netmask = ipnet.netmask
+				self.router = ROUTERS_MAP[str(ipnet)]
+				break
+
+		if not found:
+			self.ipaddr_error.set_text("That network is not valid for servers.")
+			return	
+
+		self.ipaddr_error.set_text("VALID! " + str(self.router) + " " + str(self.netmask))
+		return	
+
+		#self.view_go()
 
 	def view_auth(self):
 
@@ -135,25 +210,69 @@ class BigTextDisplay:
 
 		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
 
-		return urwid.AttrMap(frame, 'bg')
+		self.switch_view(urwid.AttrMap(frame, 'bg'))
 		
 	def view_sethostname(self):
 		div = urwid.Divider()
 
-		htxt = urwid.Text(u"Welcome to the setup wizard. Please enter the following information. Use the arrow keys to move between fields.",align='left')
+		htxt = urwid.Text(u"Welcome to the installation wizard. Please enter the hostname of the server. Use the arrow keys to move between fields.",align='left')
 
-		self.hostname_edit = urwid.Edit( caption=('label',"      Hostname:  "),edit_text=self.get_system_hostname())
+		self.hostname_edit = urwid.Edit( caption=('label'," Hostname:  "),edit_text=self.get_system_hostname())
 		ed = urwid.AttrMap(self.hostname_edit, 'edit')
 
 		button = urwid.Button("Continue")
 		urwid.connect_signal(button, 'click', self.handle_hostname)
 		button = urwid.Padding(button,"center", width=12)
 
-		pile = urwid.Pile([div,htxt,div,ed,div,button])
+		self.hostname_error = urwid.Text(u"",align='left')
+		err = urwid.AttrMap(self.hostname_error, 'error')
+
+		pile = urwid.Pile([div,htxt,div,ed,div,button,div,err])
 		pile = urwid.Padding(pile, "left", left=1,right=1)
 		fill = urwid.Filler(pile, 'top')
 		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
-		return urwid.AttrMap(frame, 'bg')
+		self.switch_view(urwid.AttrMap(frame, 'bg'))
+
+	def view_setipaddr(self):
+		div = urwid.Divider()
+
+		htxt = urwid.Text(u"Please enter the IP address for interface " + self.netif,align='left')
+
+		self.ipaddr_edit = urwid.Edit( caption=('label'," IP Address:  "),edit_text=self.get_ip_from_hostname())
+		ed = urwid.AttrMap(self.ipaddr_edit, 'edit')
+
+		mtxt = urwid.Text(u"The netmask and gateway will be determined automatically based on the address. " + self.netif,align='left')
+
+		button = urwid.Button("Continue")
+		urwid.connect_signal(button, 'click', self.handle_ipaddr)
+		button = urwid.Padding(button,"center", width=12)
+
+		self.ipaddr_error = urwid.Text(u"",align='left')
+		err = urwid.AttrMap(self.ipaddr_error, 'error')
+
+		pile = urwid.Pile([div,htxt,div,ed,div,button,div,err])
+		pile = urwid.Padding(pile, "left", left=1,right=1)
+		fill = urwid.Filler(pile, 'top')
+		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
+		self.switch_view(urwid.AttrMap(frame, 'bg'))
+
+	def view_fatal_error(self,message):
+		div = urwid.Divider()
+
+		bt = urwid.BigText('oh no!', font=urwid.font.HalfBlock5x4Font())
+		btwp = urwid.Padding(bt, "center", 'clip')
+		htxt = urwid.Text(u"A fatal error occured",align='left')
+		mtxt = urwid.Text(message,align='left')
+
+		button = urwid.Button("Exit installer")
+		urwid.connect_signal(button, 'click', self.handle_exit)
+		button = urwid.Padding(button,"center", width=18)
+
+		pile = urwid.Pile([div,btwp,div,htxt,div,mtxt,div,button])
+		pile = urwid.Padding(pile, "left", left=1,right=1)
+		fill = urwid.Filler(pile, 'top')
+		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
+		self.switch_view(urwid.AttrMap(frame, 'bg'))
 
 if '__main__'==__name__:
 	BigTextDisplay().main()
