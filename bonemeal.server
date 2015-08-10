@@ -130,7 +130,7 @@ class BigTextDisplay:
 
 		if len(interfaces) == 1:
 			## set interface to the only one in the list
-			self.netif = chosen_interface
+			self.netif = interfaces[0]
 			self.view_setipaddr()
 			return
 
