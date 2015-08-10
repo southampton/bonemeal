@@ -440,11 +440,11 @@ class BigTextDisplay:
 			return
 
 		## REGISTER WITH RHN
-		self.add_msg("Preparing to register with RH Satellite " + self.netif)
-		(code, stdout, stderr) = self.sysexec(["wget ","-q","-O","/tmp/rhn-org-trusted-ssl-cert-1.0-1.noarch.rpm","http://rhn.soton.ac.uk/pub/rhn-org-trusted-ssl-cert-1.0-1.noarch.rpm"])
+		self.add_msg("Preparing to register with RH Satellite")
+		(code, stdout, stderr) = self.sysexec(["wget","-q","-O","/tmp/rhn-org-trusted-ssl-cert-1.0-1.noarch.rpm","http://rhn.soton.ac.uk/pub/rhn-org-trusted-ssl-cert-1.0-1.noarch.rpm"])
 
 		if code != 0:
-			self.add_msg("FATAL: Could not install rhn-org-trusted-ssl-cert rpm:")
+			self.add_msg("FATAL: Could not download rhn-org-trusted-ssl-cert rpm:")
 			self.add_msg(stdout)
 			self.add_msg(stderr)
 			return
