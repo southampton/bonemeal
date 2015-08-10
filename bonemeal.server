@@ -204,7 +204,7 @@ class BigTextDisplay:
 				break
 
 		if not found:
-			self.ipaddr_error.set_text("That network is not valid for servers.")
+			self.ipaddr_error.set_text("That network is not valid for servers. You can choose DHCP if you wish instead.")
 			return	
 
 	#	self.ipaddr_error.set_text("VALID! " + str(self.router) + " " + str(self.netmask))
@@ -441,7 +441,15 @@ class BigTextDisplay:
 
 		## REGISTER WITH RHN
 		self.add_msg("Preparing to register with RH Satellite " + self.netif)
-		(code, stdout, stderr) = self.sysexec(["/bin/rpm","-ivh","http://rhn.soton.ac.uk/pub/rhn-org-trusted-ssl-cert-1.0-1.noarch.rpm"])
+		(code, stdout, stderr) = self.sysexec(["wget ","-q","-O","/tmp/rhn-org-trusted-ssl-cert-1.0-1.noarch.rpm","http://rhn.soton.ac.uk/pub/rhn-org-trusted-ssl-cert-1.0-1.noarch.rpm"])
+
+		if code != 0:
+			self.add_msg("FATAL: Could not install rhn-org-trusted-ssl-cert rpm:")
+			self.add_msg(stdout)
+			self.add_msg(stderr)
+			return
+
+		(code, stdout, stderr) = self.sysexec(["/bin/rpm","-ivh","/tmp/rhn-org-trusted-ssl-cert-1.0-1.noarch.rpm"])
 
 		if code != 0:
 			self.add_msg("FATAL: Could not install rhn-org-trusted-ssl-cert rpm:")
