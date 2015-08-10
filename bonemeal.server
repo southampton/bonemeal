@@ -4,6 +4,7 @@ import urwid
 import platform # for get hostname and configure
 import os # for get network interfaces
 import socket # for get ip from hostname
+import subprocess # for sysexec
 from netaddr import IPAddress, IPNetwork
 
 SETUP_TITLE           = ' Red Hat Enterprise Linux 7 Server Installer';
@@ -33,6 +34,8 @@ ROUTERS_MAP = {
 }
 
 ## TODO logging framework
+## TODO syslog too?
+## TODO rhel6 support
 	
 class BigTextDisplay:
 
@@ -70,6 +73,14 @@ class BigTextDisplay:
 			self.view_sethostname()
 			self.start = False
 
+	def sysexec(self,command):
+		try:
+			proc = subprocess.Popen(command,stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+			(stdoutdata, stderrdata) = proc.communicate()
+			return (proc.returncode,str(stdoutdata),str(stderrdata))
+		except Exception as ex:
+			#syslog.syslog("sysexec exception: " + str(ex))
+			return (1,"",str(ex))
 
 	## functions to lookup data from the local system
 	def get_system_hostname(self):
@@ -156,15 +167,16 @@ class BigTextDisplay:
 
 	def handle_hostname(self,button):
 		self.hostname = self.hostname_edit.get_edit_text()
-		if not self.hostname.endswith(".soton.ac.uk"):
-			if not "soton.ac.uk" in self.hostname:
-				if self.hostname.endswith("."):
-					self.hostname = self.hostname + "soton.ac.uk"
-				else:
-					self.hostname = self.hostname + ".soton.ac.uk"
-			else:
-				self.hostname_error.set_text("That hostname is invalid. Please try again.")
-				return
+
+		if self.hostname.endswith(".soton.ac.uk"):
+			self.hostname = self.hostname = self.hostname[:-len(".soton.ac.uk")]
+
+		if "." in self.hostname:
+			self.hostname_error.set_text("That hostname is invalid. Please try again.")
+			return
+
+		# Strip off the domain
+		self.fqdn = self.hostname + ".soton.ac.uk"
 
 		self.footer_text.set_text(self.hostname)
 		self.view_choosenet()
@@ -322,15 +334,26 @@ class BigTextDisplay:
 		if distid == 'Maipo':
 			self.release = 7
 			self.add_msg("Detected operating system as RHEL7")
-		elif distid == 'Santiago':
-			self.release = 6
-			self.add_msg("Detected operating system as RHEL6")
+#		elif distid == 'Santiago':
+#			self.release = 6
+#			self.add_msg("Detected operating system as RHEL6")
 		else:
 			self.fatal("Your operating system was not recognised. This installer supports RHEL6 or RHEL7.")
 			return None
 
 		## set hostname
-		## hostnamectl set-hostname <name> on RHEL7
+		if self.release == 7:
+			(code, stdout, stderr) = self.sysexec(["/bin/hostnamectl","set-hostname",self.hostname])
+
+			if code != 0:
+				self.add_msg("FATAL: could not set hostname:")
+				self.add_msg(stdout)
+				self.add_msg(stderr)
+				return
+			else:
+				self.add_msg("Short hostname set to '" + self.hostname + "'")
+
+		## do networking
 
 if '__main__'==__name__:
 	BigTextDisplay().main()
