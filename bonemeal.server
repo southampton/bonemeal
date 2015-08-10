@@ -484,7 +484,7 @@ class BigTextDisplay:
 		if code != 0:
 			self.add_msg("FATAL: puppet installation returned an error:")
 			self.add_msg(stdout)
-			self.add_msg(stderr
+			self.add_msg(stderr)
 			return
 
 	def netcfg_remove(self,line):
