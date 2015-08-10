@@ -421,11 +421,20 @@ class BigTextDisplay:
 			return
 
 		## restart the network interface using ifdown/ifup
-		self.add_msg("Restarting network interface " + self.netif)
+		self.add_msg("Stopping network interface " + self.netif)
 		(code, stdout, stderr) = self.sysexec(["/sbin/ifdown",self.netif])
 
 		if code != 0:
 			self.add_msg("FATAL: ifdown " + self.netif + " failed")
+			self.add_msg(stdout)
+			self.add_msg(stderr)
+			return
+
+		self.add_msg("Starting network interface " + self.netif)
+		(code, stdout, stderr) = self.sysexec(["/sbin/ifup",self.netif])
+
+		if code != 0:
+			self.add_msg("FATAL: ifup " + self.netif + " failed")
 			self.add_msg(stdout)
 			self.add_msg(stderr)
 			return
