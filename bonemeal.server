@@ -71,6 +71,8 @@ class BigTextDisplay:
 		if self.start:
 			self.view_sethostname()
 			self.start = False
+		elif key == 'Q':
+			raise urwid.ExitMainLoop()
 
 	def sysexec(self,command,shell=False):
 
@@ -449,13 +451,19 @@ class BigTextDisplay:
 			self.add_msg(stderr)
 			return
 
-		(code, stdout, stderr) = self.sysexec(["/bin/rpm","-ivh","/tmp/rhn-org-trusted-ssl-cert-1.0-1.noarch.rpm"])
+		## See if the rpm is already installed
+		(code, stdout, stderr) = self.sysexec(["/bin/rpm","-qi","rhn-org-trusted-ssl-cert"])
 
-		if code != 0:
-			self.add_msg("FATAL: Could not install rhn-org-trusted-ssl-cert rpm:")
-			self.add_msg(stdout)
-			self.add_msg(stderr)
-			return
+		if code == 0:
+			self.add_msg("NOTICE: rhn-org-trusted-ssl-cert already installed")
+		else:
+			(code, stdout, stderr) = self.sysexec(["/bin/rpm","-ivh","/tmp/rhn-org-trusted-ssl-cert-1.0-1.noarch.rpm"])
+
+			if code != 0:
+				self.add_msg("FATAL: Could not install rhn-org-trusted-ssl-cert rpm:")
+				self.add_msg(stdout)
+				self.add_msg(stderr)
+				return
 
 		(code, stdout, stderr) = self.sysexec(["/bin/wget","-q","-O","/etc/sysconfig/rhn/up2date","https://rhn.soton.ac.uk/pub/up2date","--no-check-certificate"])
 
@@ -515,5 +523,7 @@ class BigTextDisplay:
 
 if '__main__'==__name__:
 	BigTextDisplay().main()
+	subprocess.call(["reset"])
+	print "bonemeal installer exited"
 	#BigTextDisplay().get_network_interfaces()
 
