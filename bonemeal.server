@@ -295,7 +295,7 @@ class BigTextDisplay:
 	def view_go(self):
 		div = urwid.Divider()
 
-		self.msgs = urwid.SimpleListWalker([urwid.Text(" ",align='left'),urwid.Text(" Starting post-install",align='left')])
+		self.msgs = urwid.SimpleFocusListWalker([urwid.Text(" ",align='left'),urwid.Text(" Starting post-install",align='left')])
 		self.msgs_box = urwid.ListBox(self.msgs)
 
 		frame = urwid.Frame(header=self.header, body=self.msgs_box, footer=self.footer)
@@ -325,7 +325,6 @@ class BigTextDisplay:
 	def add_msg(self,message):
 		self.msgs.append(urwid.Text(" " + message.rstrip(),align='left'))
 		self.loop.draw_screen()
-		self.msgs_box.set_focus(self.msgs.focus + 1)
 
 	def configure(self):
 		## set hostname
