@@ -324,6 +324,7 @@ class BigTextDisplay:
 
 	def add_msg(self,message):
 		self.msgs.append(urwid.Text(" " + message.rstrip(),align='left'))
+		self.loop.draw_screen()
 
 	def configure(self):
 		## set hostname
