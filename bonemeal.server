@@ -512,6 +512,10 @@ class BigTextDisplay:
 			self.add_msg(stdout)
 			self.add_msg(stderr)
 			return
+		else:
+			self.add_msg(stdout)
+
+		self.add_msg("Installation Complete")
 
 	def netcfg_remove(self,line):
 		removals = ['BOOTPROTO','DHCPCLASS','NM_CONTROLLED','IPADDR','NETMASK','GATEWAY','PEERDNS']
