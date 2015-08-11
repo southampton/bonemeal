@@ -491,7 +491,7 @@ class BigTextDisplay:
 
 		self.add_msg("Registering with RH Satellite")
 
-		(code, stdout, stderr) = self.sysexec(["/sbin/rhnreg_ks","--force",'--activationkey="1-768e8ff0478f68eecff9fc21b686c560"'])
+		(code, stdout, stderr) = self.sysexec('/sbin/rhnreg_ks --force --activationkey="1-768e8ff0478f68eecff9fc21b686c560"',shell=True) 
 
 		if code != 0:
 			self.add_msg("FATAL: Could not register with rhn.soton.ac.uk:")
