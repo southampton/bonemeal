@@ -1,17 +1,23 @@
 #!/usr/bin/python
 
 import urwid
-import platform # for get hostname and configure
-import os # for get network interfaces
-import os.path # for install section
-import socket # for get ip from hostname
+import platform   # for get hostname and configure
+import os         # for get network interfaces
+import os.path    # for install section
+import socket     # for get ip from hostname
 import subprocess # for sysexec
-import requests # for auth/register
+import requests   # for auth/register
+import syslog     # syslogging
+import logging
+from logging.handlers import SysLogHandler
+
 from netaddr import IPAddress, IPNetwork
 
 SETUP_TITLE           = ' Red Hat Enterprise Linux 7 Server Installer';
 SETUP_VERSION         = '2015-08-12-01';
 PE_INSTALL_CMD        = 'curl -k https://poc.puppet.soton.ac.uk:8140/packages/current/install.bash | bash'
+PUPPET_SSL_ROOT       = '/etc/puppetlabs/puppet/ssl/'
+PUPPET_BINARY         = '/usr/local/bin/puppet'
 DIORITE_URL           = 'https://poc.puppet.soton.ac.uk:5000/getcert/user'
 DIORITE_SSL_CA_FILE   = '/tmp/puppetca.pem'
 
@@ -54,6 +60,17 @@ class Bonemeal:
 ################################################################################
 
 	def main(self):
+		# logging
+		logging.basicConfig(level=logging.INFO)
+		self.log = logging.getLogger("bonemeal")
+		fileHandler = logging.FileHandler('install.log')
+		fileHandler.setLevel(logging.INFO)
+		self.log.addHandler(fileHandler)
+
+		syslogHandler = SysLogHandler(address="/dev/log")
+		syslogHandler.setLevel(logging.INFO)
+		self.log.addHandler(syslogHandler)
+
 		self.setup_header_footer()
 		self.loop = urwid.MainLoop(self.view_default(), self.palette, unhandled_input=self.unhandled_input)
 		self.loop.run()
@@ -320,8 +337,15 @@ class Bonemeal:
 			return				
 
 		if r.status_code == 200:
-			self.auth_error.set_text("Authentication success")
-			## move on to setup
+			try:
+				self.json = r.json()
+				self.puppet_private_key = self.json['private_key']
+				self.puppet_public_key  = self.json['public_key']
+				self.puppet_cert        = self.json['cert']
+				self.view_go()
+			except Exception as ex:
+				self.auth_error.set_text("Failed to parse return response: " + str(ex))
+
 			return	
 		elif r.status_code == 403:
 			self.auth_error.set_text("Authentication failed: Incorrect username/password")
@@ -351,14 +375,6 @@ class Bonemeal:
 		#self.msgs_box.set_focus(self.msgs.focus + 1)
 
 	def configure(self):
-		## set hostname done
-		## configure networking
-		## restart network
-		## register with rhn
-		## apply updates
-		## install puppet
-		## wait for cert...
-
 		## work out OS version
 		(distname, distversion, distid) = platform.linux_distribution()
 
@@ -543,6 +559,32 @@ class Bonemeal:
 			self.add_msg("FATAL: puppet installation returned an error:")
 			self.add_msg(stdout)
 			self.add_msg(stderr)
+			return
+
+		self.add_msg("Deploying Puppet certificate")
+
+		## Deploy certificates and set certname option in puppet.conf
+		try:
+			with open(PUPPET_SSL_ROOT + "certs/" + self.fqdn + ".pem", "w") as fp:
+				fp.write(self.puppet_cert)
+
+			with open(PUPPET_SSL_ROOT + "public_keys/" + self.fqdn + ".pem", "w") as fp:
+				fp.write(self.puppet_public_key)
+
+			with open(PUPPET_SSL_ROOT + "private_keys/" + self.fqdn + ".pem", "w") as fp:
+				fp.write(self.puppet_private_key)
+		except Exception as ex:
+			self.add_msg("FATAL: could not save puppet certificate files:")
+			self.add_msg(str(ex))
+			return
+
+		self.add_msg("Applying puppet configuration")
+		## we run twice just to be sure. we only care about the exit code of the second
+		self.sysexec(PUPPET_BINARY + " agent --test",shell=True)
+		(code, stdout, stderr) = self.sysexec(PUPPET_BINARY + " agent --test",shell=True)
+
+		if code != 0 and code != 2:
+			self.add_msg("FATAL: puppet policy failed. Please see the install.log on reboot.")
 			return
 
 		self.add_msg("Installation Complete")
