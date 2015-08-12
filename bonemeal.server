@@ -14,7 +14,7 @@ from logging.handlers import SysLogHandler
 from netaddr import IPAddress, IPNetwork
 
 SETUP_TITLE           = ' Red Hat Enterprise Linux 7 Server Installer';
-SETUP_VERSION         = '2015-08-12-01';
+SETUP_VERSION         = '2015-08-12-10';
 PE_INSTALL_CMD        = 'curl -k https://poc.puppet.soton.ac.uk:8140/packages/current/install.bash | bash'
 PUPPET_SSL_ROOT       = '/etc/puppetlabs/puppet/ssl/'
 PUPPET_BINARY         = '/usr/local/bin/puppet'
