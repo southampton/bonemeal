@@ -551,6 +551,17 @@ class Bonemeal:
 		## APPLY SOFTWARE UPDATES
 		# TODO
 
+		# a dependency on our use of puppet is lsb based facter variables
+		# so we install it first.
+		self.add_msg("Installing redhat-lsb-core package")
+		(code, stdout, stderr) = self.sysexec("/usr/bin/yum install redhat-lsb-core",shell=True)
+
+		if code != 0:
+			self.add_msg("FATAL: could not install redhat-lsb-core package:")
+			self.add_msg(stdout)
+			self.add_msg(stderr)
+			return
+
 		## INSTALL PUPPET
 		self.add_msg("Installing Puppet Enterprise")
 		(code, stdout, stderr) = self.sysexec(PE_INSTALL_CMD,shell=True)
