@@ -13,6 +13,7 @@ SETUP_TITLE           = ' Red Hat Enterprise Linux 7 Server Installer';
 SETUP_VERSION         = '2015-08-12-01';
 PE_INSTALL_CMD        = 'curl -k https://poc.puppet.soton.ac.uk:8140/packages/current/install.bash | bash'
 DIORITE_URL           = 'https://poc.puppet.soton.ac.uk:5000/getcert/user'
+DIORITE_SSL_CA_FILE   = '/tmp/puppetca.pem'
 
 ## NETWORK CONFIGS
 NETWORKS_LIST = [IPNetwork("152.78.128.0/22"),
@@ -311,19 +312,22 @@ class Bonemeal:
 
 	def handle_auth(self,button):
 		## python requests call with SSL...
-		## TODO SSL with verify
 		try:
 			payload = {'hostname': self.fqdn, 'username': self.username.get_edit_text(), 'password': self.password.get_edit_text()}
-			r = requests.post(DIORITE_URL, data=payload)
+			r = requests.post(DIORITE_URL, data=payload, verify = DIORITE_SSL_CA_FILE)
 		except Exception as ex:
 			self.auth_error.set_text("Error contacting registration server: " + str(ex))
 			return				
 
 		if r.status_code == 200:
 			self.auth_error.set_text("Authentication success")
+			## move on to setup
 			return	
+		elif r.status_code == 403:
+			self.auth_error.set_text("Authentication failed: Incorrect username/password")
+			return
 		else:
-			self.auth_error.set_text("Authentication failed HTTP code " + str(r.status_code))
+			self.auth_error.set_text("Registration failed: Error code " + str(r.status_code))
 			return
 
 ################################################################################
