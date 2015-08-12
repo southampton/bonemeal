@@ -490,7 +490,7 @@ class Bonemeal:
 
 		## REGISTER WITH RHN
 		self.add_msg("Preparing to register with RH Satellite")
-		(code, stdout, stderr) = self.sysexec(["wget","-q","-O","/tmp/rhn-org-trusted-ssl-cert-1.0-1.noarch.rpm","http://rhn.soton.ac.uk/pub/rhn-org-trusted-ssl-cert-1.0-1.noarch.rpm"])
+		(code, stdout, stderr) = self.sysexec(["wget","-q","-O","/tmp/rhn-org-trusted-ssl-cert-1.0-1.noarch.rpm","https://rhn.soton.ac.uk/pub/rhn-org-trusted-ssl-cert-1.0-1.noarch.rpm","--no-check-certificate"])
 
 		if code != 0:
 			self.add_msg("FATAL: Could not download rhn-org-trusted-ssl-cert rpm:")
@@ -599,6 +599,9 @@ class Bonemeal:
 			return
 
 		self.add_msg("Installation Complete")
+
+		## disable setup
+		## reboot
 
 	def netcfg_remove(self,line):
 		removals = ['BOOTPROTO','DHCPCLASS','NM_CONTROLLED','IPADDR','NETMASK','GATEWAY','PEERDNS']
