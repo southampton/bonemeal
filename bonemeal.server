@@ -3,14 +3,16 @@
 import urwid
 import platform # for get hostname and configure
 import os # for get network interfaces
-import os.path
+import os.path # for install section
 import socket # for get ip from hostname
 import subprocess # for sysexec
+import requests # for auth/register
 from netaddr import IPAddress, IPNetwork
 
 SETUP_TITLE           = ' Red Hat Enterprise Linux 7 Server Installer';
-SETUP_VERSION         = '2015-08-06-01';
-PE_INSTALL_CMD        = "curl -k https://poc.puppet.soton.ac.uk:8140/packages/current/install.bash | bash"
+SETUP_VERSION         = '2015-08-12-01';
+PE_INSTALL_CMD        = 'curl -k https://poc.puppet.soton.ac.uk:8140/packages/current/install.bash | bash'
+DIORITE_URL           = 'https://poc.puppet.soton.ac.uk:5000/getcert/user'
 
 ## NETWORK CONFIGS
 NETWORKS_LIST = [IPNetwork("152.78.128.0/22"),
@@ -36,7 +38,7 @@ ROUTERS_MAP = {
 ## TODO syslog too?
 ## TODO rhel6 support
 	
-class BigTextDisplay:
+class Bonemeal:
 
 	palette = [
 		('edit', 'black', 'light gray'),
@@ -48,7 +50,8 @@ class BigTextDisplay:
 
 	start = True
 
-	## core functions
+################################################################################
+
 	def main(self):
 		self.setup_header_footer()
 		self.loop = urwid.MainLoop(self.view_default(), self.palette, unhandled_input=self.unhandled_input)
@@ -84,6 +87,11 @@ class BigTextDisplay:
 			#syslog.syslog("sysexec exception: " + str(ex))
 			return (1,"",str(ex))
 
+	def handle_exit(self,button):
+		raise urwid.ExitMainLoop()
+
+################################################################################
+
 	## functions to lookup data from the local system
 	def get_system_hostname(self):
 		name = platform.node()
@@ -109,7 +117,8 @@ class BigTextDisplay:
 		except socket.gaierror as e:
 			return ""
 
-	## view functions
+################################################################################
+## DEFAULT VIEW
 
 	def view_default(self):
 
@@ -123,6 +132,49 @@ class BigTextDisplay:
 
 		frame = urwid.Frame(header=self.header, body=pile1, footer=self.footer)
 		return urwid.AttrMap(frame, 'bg')
+
+################################################################################
+## SET HOSTNAME
+
+	def view_sethostname(self):
+		div = urwid.Divider()
+
+		htxt = urwid.Text(u"Welcome to the installation wizard. Please enter the hostname of the server. Use the arrow keys to move between fields.",align='left')
+
+		self.hostname_edit = urwid.Edit( caption=('label'," Hostname:  "),edit_text=self.get_system_hostname())
+		ed = urwid.AttrMap(self.hostname_edit, 'edit')
+
+		button = urwid.Button("Continue")
+		urwid.connect_signal(button, 'click', self.handle_hostname)
+		button = urwid.Padding(button,"center", width=12)
+
+		self.hostname_error = urwid.Text(u"",align='left')
+		err = urwid.AttrMap(self.hostname_error, 'error')
+
+		pile = urwid.Pile([div,htxt,div,ed,div,button,div,err])
+		pile = urwid.Padding(pile, "left", left=1,right=1)
+		fill = urwid.Filler(pile, 'top')
+		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
+		self.switch_view(urwid.AttrMap(frame, 'bg'))
+
+	def handle_hostname(self,button):
+		self.hostname = self.hostname_edit.get_edit_text()
+
+		if self.hostname.endswith(".soton.ac.uk"):
+			self.hostname = self.hostname = self.hostname[:-len(".soton.ac.uk")]
+
+		if "." in self.hostname:
+			self.hostname_error.set_text("That hostname is invalid. Please try again.")
+			return
+
+		# Strip off the domain
+		self.fqdn = self.hostname + ".soton.ac.uk"
+
+		self.footer_text.set_text(self.fqdn)
+		self.view_choosenet()
+
+################################################################################
+## CHOOSE NETWORK INTERFACE
 
 	def view_choosenet(self):
 		interfaces = self.get_network_interfaces()
@@ -141,7 +193,6 @@ class BigTextDisplay:
 		for name in interfaces:
 			button = urwid.Button(name)
 			urwid.connect_signal(button, 'click', self.handle_interfaces, name)
-			#btns.append(urwid.AttrMap(button, None, focus_map='reversed'))
 			btns.append(button)
 
 		listbox = urwid.ListBox(urwid.SimpleFocusListWalker(btns))
@@ -166,102 +217,8 @@ class BigTextDisplay:
 		self.footer_text.set_text(self.fqdn + " / " + self.netif)
 		self.view_setipaddr()
 
-	def handle_exit(self,button):
-		raise urwid.ExitMainLoop()
-
-	def handle_hostname(self,button):
-		self.hostname = self.hostname_edit.get_edit_text()
-
-		if self.hostname.endswith(".soton.ac.uk"):
-			self.hostname = self.hostname = self.hostname[:-len(".soton.ac.uk")]
-
-		if "." in self.hostname:
-			self.hostname_error.set_text("That hostname is invalid. Please try again.")
-			return
-
-		# Strip off the domain
-		self.fqdn = self.hostname + ".soton.ac.uk"
-
-		self.footer_text.set_text(self.fqdn)
-		self.view_choosenet()
-
-	def handle_ipaddr(self,button):
-		self.ipaddr = self.ipaddr_edit.get_edit_text()
-		self.dhcp = False
-
-		## validate the ip address
-		try:
-			address = IPAddress(self.ipaddr)
-		except Exception as ex:
-			self.ipaddr_error.set_text("That IP address is invalid. Please try again.")
-			return
-
-		## Now try to recognise the network it is within
-		found = False
-		for ipnet in NETWORKS_LIST:
-			if address in ipnet:
-				found = True
-				self.netmask = ipnet.netmask
-				self.router = ROUTERS_MAP[str(ipnet)]
-				break
-
-		if not found:
-			self.ipaddr_error.set_text("That network is not valid for servers. You can choose DHCP if you wish instead.")
-			return	
-
-	#	self.ipaddr_error.set_text("VALID! " + str(self.router) + " " + str(self.netmask))
-
-		self.footer_text.set_text(self.fqdn + " / " + self.netif + " / " + self.ipaddr)
-		self.view_go()	
-
-	def handle_dhcp(self,button):
-		self.dhcp = True
-		self.footer_text.set_text(self.fqdn + " / " + self.netif + " / dhcp")
-		self.view_go()	
-
-	def view_auth(self):
-
-		div = urwid.Divider()
-
-		htxt = urwid.Text(u"Welcome to the setup wizard. Please enter the following information. Use the arrow keys to move between fields.",align='left')
-		ed = urwid.Edit( caption=('label',"      Hostname:  "),edit_text=self.get_system_hostname())
-		ed = urwid.AttrMap(ed, 'edit')
-
-		mtxt = urwid.Text(u"Please enter your University username and password in order to register this system.",align='left')
-
-		ed4 = urwid.Edit(caption=('label'," Your Username:  "))
-		ed4 = urwid.AttrMap(ed4, 'edit')
-		ed5 = urwid.Edit(caption=('label'," Your Password:  "))
-		ed5 = urwid.AttrMap(ed5, 'edit')
-
-		pile = urwid.Pile([div,htxt,div,ed,div,mtxt,div,ed4,div,ed5])
-		pile = urwid.Padding(pile, "left", left=1,right=1)
-		fill = urwid.Filler(pile, 'top')
-
-		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
-
-		self.switch_view(urwid.AttrMap(frame, 'bg'))
-		
-	def view_sethostname(self):
-		div = urwid.Divider()
-
-		htxt = urwid.Text(u"Welcome to the installation wizard. Please enter the hostname of the server. Use the arrow keys to move between fields.",align='left')
-
-		self.hostname_edit = urwid.Edit( caption=('label'," Hostname:  "),edit_text=self.get_system_hostname())
-		ed = urwid.AttrMap(self.hostname_edit, 'edit')
-
-		button = urwid.Button("Continue")
-		urwid.connect_signal(button, 'click', self.handle_hostname)
-		button = urwid.Padding(button,"center", width=12)
-
-		self.hostname_error = urwid.Text(u"",align='left')
-		err = urwid.AttrMap(self.hostname_error, 'error')
-
-		pile = urwid.Pile([div,htxt,div,ed,div,button,div,err])
-		pile = urwid.Padding(pile, "left", left=1,right=1)
-		fill = urwid.Filler(pile, 'top')
-		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
-		self.switch_view(urwid.AttrMap(frame, 'bg'))
+################################################################################
+## SET IP ADDRESS
 
 	def view_setipaddr(self):
 		div = urwid.Divider()
@@ -292,6 +249,86 @@ class BigTextDisplay:
 		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
 		self.switch_view(urwid.AttrMap(frame, 'bg'))
 
+	def handle_ipaddr(self,button):
+		self.ipaddr = self.ipaddr_edit.get_edit_text()
+		self.dhcp = False
+
+		## validate the ip address
+		try:
+			address = IPAddress(self.ipaddr)
+		except Exception as ex:
+			self.ipaddr_error.set_text("That IP address is invalid. Please try again.")
+			return
+
+		## Now try to recognise the network it is within
+		found = False
+		for ipnet in NETWORKS_LIST:
+			if address in ipnet:
+				found = True
+				self.netmask = ipnet.netmask
+				self.router = ROUTERS_MAP[str(ipnet)]
+				break
+
+		if not found:
+			self.ipaddr_error.set_text("That network is not valid for servers. You can choose DHCP if you wish instead.")
+			return	
+
+		self.footer_text.set_text(self.fqdn + " / " + self.netif + " / " + self.ipaddr)
+		self.view_auth()	
+
+	def handle_dhcp(self,button):
+		self.dhcp = True
+		self.footer_text.set_text(self.fqdn + " / " + self.netif + " / dhcp")
+		self.view_auth()	
+
+################################################################################
+## AUTHENTICATE / REGISTER
+		
+	def view_auth(self):
+
+		div = urwid.Divider()
+
+		mtxt = urwid.Text(u"Please enter your University username and password in order to register this system.",align='left')
+
+		self.username = urwid.Edit(caption=('label'," Username:  "),allow_tab=False)
+		edituser = urwid.AttrMap(self.username, 'edit')
+		self.password = urwid.Edit(caption=('label'," Password:  "),mask="*")
+		editpass = urwid.AttrMap(self.password, 'edit')
+
+		button1 = urwid.Button("Continue")
+		urwid.connect_signal(button1, 'click', self.handle_auth)
+		button1 = urwid.Padding(button1,"center", width=12)
+
+		self.auth_error = urwid.Text(u"",align='left')
+		err = urwid.AttrMap(self.auth_error, 'error')
+
+		pile = urwid.Pile([div,mtxt,div,edituser,div,editpass,div,button1,div,err])
+		pile = urwid.Padding(pile, "left", left=1,right=1)
+		fill = urwid.Filler(pile, 'top')
+
+		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
+		self.switch_view(urwid.AttrMap(frame, 'bg'))
+
+	def handle_auth(self,button):
+		## python requests call with SSL...
+		## TODO SSL with verify
+		try:
+			payload = {'hostname': self.fqdn, 'username': self.username.get_edit_text(), 'password': self.password.get_edit_text()}
+			r = requests.post(DIORITE_URL, data=payload)
+		except Exception as ex:
+			self.auth_error.set_text("Error contacting registration server: " + str(ex))
+			return				
+
+		if r.status_code == 200:
+			self.auth_error.set_text("Authentication success")
+			return	
+		else:
+			self.auth_error.set_text("Authentication failed HTTP code " + str(r.status_code))
+			return
+
+################################################################################
+## DO INSTALL "GO"
+
 	def view_go(self):
 		div = urwid.Divider()
 
@@ -304,30 +341,13 @@ class BigTextDisplay:
 		## now do the install
 		self.configure()
 
-	def view_fatal_error(self,message):
-		div = urwid.Divider()
-
-		bt = urwid.BigText('oh no!', font=urwid.font.HalfBlock5x4Font())
-		btwp = urwid.Padding(bt, "center", 'clip')
-		htxt = urwid.Text(u"A fatal error occured",align='left')
-		mtxt = urwid.Text(message,align='left')
-
-		button = urwid.Button("Exit installer")
-		urwid.connect_signal(button, 'click', self.handle_exit)
-		button = urwid.Padding(button,"center", width=18)
-
-		pile = urwid.Pile([div,btwp,div,htxt,div,mtxt,div,button])
-		pile = urwid.Padding(pile, "left", left=1,right=1)
-		fill = urwid.Filler(pile, 'top')
-		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
-		self.switch_view(urwid.AttrMap(frame, 'bg'))
-
 	def add_msg(self,message):
 		self.msgs.append(urwid.Text(" " + message.rstrip(),align='left'))
 		self.loop.draw_screen()
+		#self.msgs_box.set_focus(self.msgs.focus + 1)
 
 	def configure(self):
-		## set hostname
+		## set hostname done
 		## configure networking
 		## restart network
 		## register with rhn
@@ -341,9 +361,9 @@ class BigTextDisplay:
 		if distid == 'Maipo':
 			self.release = 7
 			self.add_msg("Detected operating system as RHEL7")
-#		elif distid == 'Santiago':
-#			self.release = 6
-#			self.add_msg("Detected operating system as RHEL6")
+		elif distid == 'Santiago':
+			self.release = 6
+			self.add_msg("Detected operating system as RHEL6")
 		else:
 			self.fatal("Your operating system was not recognised. This installer supports RHEL6 or RHEL7.")
 			return None
@@ -359,6 +379,9 @@ class BigTextDisplay:
 				return
 			else:
 				self.add_msg("Short hostname set to '" + self.hostname + "'")
+		elif self.release == 6:
+			## TODO fix
+			pass
 
 		## set fqdn if not using dhcp
 		if self.dhcp == False:
@@ -418,6 +441,7 @@ class BigTextDisplay:
 			with open(network_config_file, "w") as fp:
 				for line in netcfg:
 					fp.write(line)
+			self.add_msg("Saved new network configuration")
 		except Exception as e:
 			self.add_msg("FATAL: could not write to network config file " + network_config_file)
 			self.add_msg(str(e))
@@ -441,6 +465,8 @@ class BigTextDisplay:
 			self.add_msg(stdout)
 			self.add_msg(stderr)
 			return
+		else:
+			self.add_msg("Started network interface " + self.netif)
 
 		## REGISTER WITH RHN
 		self.add_msg("Preparing to register with RH Satellite")
@@ -499,6 +525,8 @@ class BigTextDisplay:
 			self.add_msg(stdout)
 			self.add_msg(stderr)
 			return
+		else:
+			self.add_msg("Satellite registration successful")
 
 		## APPLY SOFTWARE UPDATES
 		# TODO
@@ -512,8 +540,6 @@ class BigTextDisplay:
 			self.add_msg(stdout)
 			self.add_msg(stderr)
 			return
-		else:
-			self.add_msg(stdout)
 
 		self.add_msg("Installation Complete")
 
@@ -526,9 +552,28 @@ class BigTextDisplay:
 
 		return True
 
-if '__main__'==__name__:
-	BigTextDisplay().main()
-	subprocess.call(["reset"])
-	print "bonemeal installer exited"
-	#BigTextDisplay().get_network_interfaces()
+################################################################################
+## FATAL ERROR SCREEN
 
+	def view_fatal_error(self,message):
+		div = urwid.Divider()
+
+		bt = urwid.BigText('oh no!', font=urwid.font.HalfBlock5x4Font())
+		btwp = urwid.Padding(bt, "center", 'clip')
+		htxt = urwid.Text(u"A fatal error occured",align='left')
+		mtxt = urwid.Text(message,align='left')
+
+		button = urwid.Button("Exit installer")
+		urwid.connect_signal(button, 'click', self.handle_exit)
+		button = urwid.Padding(button,"center", width=18)
+
+		pile = urwid.Pile([div,btwp,div,htxt,div,mtxt,div,button])
+		pile = urwid.Padding(pile, "left", left=1,right=1)
+		fill = urwid.Filler(pile, 'top')
+		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
+		self.switch_view(urwid.AttrMap(frame, 'bg'))
+
+if '__main__'==__name__:
+	Bonemeal().main()
+	subprocess.call(["reset"])
+	print "bonemeal installer exit()"
