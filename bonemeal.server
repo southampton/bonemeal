@@ -488,6 +488,22 @@ class Bonemeal:
 		else:
 			self.add_msg("Started network interface " + self.netif)
 
+		## because we set PEERDNS=no in the network settings the system has no idea, even with dhcp, what dns servers to use.
+		## puppet will set them later, but we still need dns servers before that, so we'll write out a sample
+		## resolv.conf to bootstrap us to puppet.
+		## we set PEERDNS=no because puppet manages resolv.conf normally and we dont want the network and puppet fighting over the resolv.conf file.
+		try:
+			with open("/etc/resolv.conf", "w") as fp:
+				fp.write("""search soton.ac.uk
+nameserver 152.78.110.110
+nameserver 152.78.111.81
+nameserver 152.78.111.113
+""")
+		except Exception as ex:
+			self.add_msg("FATAL: could not write to /etc/resolv.conf:")
+			self.add_msg(str(ex))
+			return
+
 		## REGISTER WITH RHN
 		self.add_msg("Preparing to register with RH Satellite")
 		(code, stdout, stderr) = self.sysexec(["wget","-q","-O","/tmp/rhn-org-trusted-ssl-cert-1.0-1.noarch.rpm","https://rhn.soton.ac.uk/pub/rhn-org-trusted-ssl-cert-1.0-1.noarch.rpm","--no-check-certificate"])
