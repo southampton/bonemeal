@@ -570,7 +570,7 @@ nameserver 152.78.111.113
 		# a dependency on our use of puppet is lsb based facter variables
 		# so we install it first.
 		self.add_msg("Installing redhat-lsb-core package")
-		(code, stdout, stderr) = self.sysexec("/usr/bin/yum install redhat-lsb-core",shell=True)
+		(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install redhat-lsb-core",shell=True)
 
 		if code != 0:
 			self.add_msg("FATAL: could not install redhat-lsb-core package:")
