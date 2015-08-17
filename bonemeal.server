@@ -416,6 +416,16 @@ class Bonemeal:
 
 		## do networking config file
 
+		## restart the network interface using ifdown/ifup
+		self.add_msg("Stopping network manager")
+		(code, stdout, stderr) = self.sysexec(["/bin/systemctl","stop","NetworkManager"],self.netif])
+
+		if code != 0:
+			self.add_msg("FATAL: could not stop network manager")
+			self.add_msg(stdout)
+			self.add_msg(stderr)
+			return
+
 		## check the config file exists (it should...)
 		self.add_msg("Attempting to read existing network configuration")
 		network_config_file = "/etc/sysconfig/network-scripts/ifcfg-" + self.netif
