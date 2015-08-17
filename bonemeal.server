@@ -418,7 +418,7 @@ class Bonemeal:
 
 		## restart the network interface using ifdown/ifup
 		self.add_msg("Stopping network manager")
-		(code, stdout, stderr) = self.sysexec(["/bin/systemctl","stop","NetworkManager"],self.netif])
+		(code, stdout, stderr) = self.sysexec(["/bin/systemctl","stop","NetworkManager"])
 
 		if code != 0:
 			self.add_msg("FATAL: could not stop network manager")
