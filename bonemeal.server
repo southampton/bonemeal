@@ -598,7 +598,17 @@ nameserver 152.78.111.113
 			self.add_msg(stderr)
 			return
 
-		self.add_msg("Deploying Puppet certificate")
+		## STOP PUPPET DAEMON FOR NOW
+		self.add_msg("Stopping puppet daemon")
+		(code, stdout, stderr) = self.sysexec(["/bin/systemctl","stop","puppet"])
+
+		if code != 0:
+			self.add_msg("FATAL: puppet stop returned an error:")
+			self.add_msg(stdout)
+			self.add_msg(stderr)
+			return
+
+		self.add_msg("Deploying new puppet certificate")
 
 		## Deploy certificates and set certname option in puppet.conf
 		try:
