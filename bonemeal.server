@@ -602,7 +602,13 @@ nameserver 152.78.111.113
 			self.add_msg("Satellite registration successful")
 
 		## APPLY SOFTWARE UPDATES
-		# TODO
+		self.add_msg("Installing software updates")
+		(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y update",shell=True)
+
+		if code != 0:
+			self.add_msg("WARN: an error occured during yum update:")
+			self.add_msg(stdout)
+			self.add_msg(stderr)
 
 		# a dependency on our use of puppet is lsb based facter variables
 		# so we install it first.
