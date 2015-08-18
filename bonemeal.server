@@ -63,7 +63,7 @@ class Bonemeal:
 		# logging
 		logging.basicConfig(level=logging.INFO)
 		self.log = logging.getLogger("bonemeal")
-		fileHandler = logging.FileHandler('install.log')
+		fileHandler = logging.FileHandler('/root/install.log')
 		fileHandler.setLevel(logging.INFO)
 		self.log.addHandler(fileHandler)
 
@@ -71,11 +71,18 @@ class Bonemeal:
 		syslogHandler.setLevel(logging.INFO)
 		self.log.addHandler(syslogHandler)
 
+		# make tab work like down arrow
+		urwid.command_map['tab'] = 'cursor down'
+
+		## log the startup
+		self.log.info("bonemeal installer version " + SETUP_VERSION + " starting up")
+
 		self.setup_header_footer()
 		self.loop = urwid.MainLoop(self.view_default(), self.palette, unhandled_input=self.unhandled_input)
 		self.loop.run()
 
 	def fatal(self,message):
+		self.log.critical("fatal error: " + message)
 		self.view_fatal_error(message)
 
 	def switch_view(self,view):
@@ -96,13 +103,14 @@ class Bonemeal:
 			raise urwid.ExitMainLoop()
 
 	def sysexec(self,command,shell=False):
+		self.log.info("executing command: " + str(command))
 
 		try:
 			proc = subprocess.Popen(command,stdout=subprocess.PIPE, stderr=subprocess.STDOUT,shell=shell)
 			(stdoutdata, stderrdata) = proc.communicate()
 			return (proc.returncode,str(stdoutdata),str(stderrdata))
 		except Exception as ex:
-			#syslog.syslog("sysexec exception: " + str(ex))
+			self.log.error("command generated an exception: " + str(ex))
 			return (1,"",str(ex))
 
 	def handle_exit(self,button):
@@ -113,6 +121,7 @@ class Bonemeal:
 	## functions to lookup data from the local system
 	def get_system_hostname(self):
 		name = platform.node()
+		self.log.info("detected hostname as " + name)
 		return name
 
 	def get_network_interfaces(self):
@@ -131,8 +140,11 @@ class Bonemeal:
 
 	def get_ip_from_hostname(self):
 		try:
-				return socket.gethostbyname(self.hostname)
+			ip = socket.gethostbyname(self.hostname)
+			self.log.info("IP address found in DNS for hostname: " + ip)
+			return ip
 		except socket.gaierror as e:
+			self.log.info("No IP address found in DNS for given hostname")
 			return ""
 
 ################################################################################
@@ -179,14 +191,19 @@ class Bonemeal:
 		self.hostname = self.hostname_edit.get_edit_text()
 
 		if self.hostname.endswith(".soton.ac.uk"):
+			self.log.info("stripping .soton.ac.uk from given hostname")
 			self.hostname = self.hostname = self.hostname[:-len(".soton.ac.uk")]
 
 		if "." in self.hostname:
 			self.hostname_error.set_text("That hostname is invalid. Please try again.")
 			return
 
+		self.log.info("chosen hostname: " + self.hostname)
+
 		# Strip off the domain
 		self.fqdn = self.hostname + ".soton.ac.uk"
+
+		self.log.info("chosen fqdn: " + self.fqdn)
 
 		self.footer_text.set_text(self.fqdn)
 		self.view_choosenet()
@@ -203,6 +220,7 @@ class Bonemeal:
 		if len(interfaces) == 1:
 			## set interface to the only one in the list
 			self.netif = interfaces[0]
+			self.log.info("only one network interface: " + self.netif)
 			self.footer_text.set_text(self.fqdn + " / " + self.netif)
 			self.view_setipaddr()
 			return
@@ -232,6 +250,7 @@ class Bonemeal:
 
 	def handle_interfaces(self,button,chosen_interface):
 		self.netif = chosen_interface
+		self.log.info("chosen network interface: " + self.netif)
 		self.footer_text.set_text(self.fqdn + " / " + self.netif)
 		self.view_setipaddr()
 
@@ -291,10 +310,16 @@ class Bonemeal:
 			self.ipaddr_error.set_text("That network is not valid for servers. You can choose DHCP if you wish instead.")
 			return	
 
+		self.log.info("static networking chosen")
+		self.log.info("chosen IP address: " + str(self.ipaddr))
+		self.log.info("router: " + str(self.router))
+		self.log.info("netmask: " + str(self.netmask))
+
 		self.footer_text.set_text(self.fqdn + " / " + self.netif + " / " + self.ipaddr)
 		self.view_auth()	
 
 	def handle_dhcp(self,button):
+		self.log.info("dhcp networking chosen")
 		self.dhcp = True
 		self.footer_text.set_text(self.fqdn + " / " + self.netif + " / dhcp")
 		self.view_auth()	
@@ -333,6 +358,7 @@ class Bonemeal:
 			payload = {'hostname': self.fqdn, 'username': self.username.get_edit_text(), 'password': self.password.get_edit_text()}
 			r = requests.post(DIORITE_URL, data=payload, verify = DIORITE_SSL_CA_FILE)
 		except Exception as ex:
+			self.log.error("error contacting registration server: " + str(ex))
 			self.auth_error.set_text("Error contacting registration server: " + str(ex))
 			return				
 
@@ -344,6 +370,7 @@ class Bonemeal:
 				self.puppet_cert        = self.json['cert']
 				self.view_go()
 			except Exception as ex:
+				self.log.error("failed to parse response from registration server: " + str(ex))
 				self.auth_error.set_text("Failed to parse return response: " + str(ex))
 
 			return	
@@ -351,6 +378,7 @@ class Bonemeal:
 			self.auth_error.set_text("Authentication failed: Incorrect username/password")
 			return
 		else:
+			self.log.error("unexpected return code from registration server: " + str(r.status_code))
 			self.auth_error.set_text("Registration failed: Error code " + str(r.status_code))
 			return
 
@@ -370,8 +398,10 @@ class Bonemeal:
 		self.configure()
 
 	def add_msg(self,message):
+		self.log.info(message)
 		self.msgs.append(urwid.Text(" " + message.rstrip(),align='left'))
 		self.loop.draw_screen()
+		self.msgs_box.set_focus(len(self.msgs_box.body))
 		#self.msgs_box.set_focus(self.msgs.focus + 1)
 
 	def configure(self):
@@ -385,7 +415,7 @@ class Bonemeal:
 			self.release = 6
 			self.add_msg("Detected operating system as RHEL6")
 		else:
-			self.fatal("Your operating system was not recognised. This installer supports RHEL6 or RHEL7.")
+			self.fatal("This operating system was not recognised. This installer supports RHEL6 or RHEL7.")
 			return None
 
 		## set hostname
@@ -502,6 +532,7 @@ class Bonemeal:
 		## puppet will set them later, but we still need dns servers before that, so we'll write out a sample
 		## resolv.conf to bootstrap us to puppet.
 		## we set PEERDNS=no because puppet manages resolv.conf normally and we dont want the network and puppet fighting over the resolv.conf file.
+		self.log.info("Saving temporary resolv.conf file")
 		try:
 			with open("/etc/resolv.conf", "w") as fp:
 				fp.write("""search soton.ac.uk
@@ -513,6 +544,18 @@ nameserver 152.78.111.113
 			self.add_msg("FATAL: could not write to /etc/resolv.conf:")
 			self.add_msg(str(ex))
 			return
+
+		self.add_msg("FATAL: Could not download rhn-org-trusted-ssl-cert rpm:")
+		self.add_msg("FATAL: Could not download rhn-org-trusted-ssl-cert rpm:")
+		self.add_msg("FATAL: Could not download rhn-org-trusted-ssl-cert rpm:")
+		self.add_msg("FATAL: Could not download rhn-org-trusted-ssl-cert rpm:")
+		self.add_msg("FATAL: Could not download rhn-org-trusted-ssl-cert rpm:")
+		self.add_msg("FATAL: Could not download rhn-org-trusted-ssl-cert rpm:")
+		self.add_msg("FATAL: Could not download rhn-org-trusted-ssl-cert rpm:")
+		self.add_msg("FATAL: Could not download rhn-org-trusted-ssl-cert rpm:")
+		self.add_msg("FATAL: Could not download rhn-org-trusted-ssl-cert rpm:")
+		self.add_msg("FATAL: Could not download rhn-org-trusted-ssl-cert rpm:")
+
 
 		## REGISTER WITH RHN
 		self.add_msg("Preparing to register with RH Satellite")
