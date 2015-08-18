@@ -13,7 +13,7 @@ from logging.handlers import SysLogHandler
 
 from netaddr import IPAddress, IPNetwork
 
-SETUP_TITLE           = ' Red Hat Enterprise Linux 7 Server Installer';
+SETUP_TITLE           = ' UoS RHEL Server Installer';
 SETUP_VERSION         = '2015-08-18-2';
 PE_INSTALL_CMD        = 'curl -k https://poc.puppet.soton.ac.uk:8140/packages/current/install.bash | bash'
 PUPPET_SSL_ROOT       = '/etc/puppetlabs/puppet/ssl/'
@@ -59,7 +59,6 @@ class Bonemeal:
 
 	def main(self):
 		# logging
-		logging.basicConfig(level=logging.INFO)
 		self.log = logging.getLogger("bonemeal")
 		fileHandler = logging.FileHandler('/root/install.log')
 		fileHandler.setLevel(logging.INFO)
