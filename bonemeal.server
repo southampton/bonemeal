@@ -14,7 +14,7 @@ from logging.handlers import SysLogHandler
 from netaddr import IPAddress, IPNetwork
 
 SETUP_TITLE           = ' Red Hat Enterprise Linux 7 Server Installer';
-SETUP_VERSION         = '2015-08-18-1';
+SETUP_VERSION         = '2015-08-18-2';
 PE_INSTALL_CMD        = 'curl -k https://poc.puppet.soton.ac.uk:8140/packages/current/install.bash | bash'
 PUPPET_SSL_ROOT       = '/etc/puppetlabs/puppet/ssl/'
 PUPPET_BINARY         = '/usr/local/bin/puppet'
@@ -41,8 +41,6 @@ ROUTERS_MAP = {
 	"10.18.36.0/22":    '10.18.39.254',
 }
 
-## TODO logging framework
-## TODO syslog too?
 ## TODO rhel6 support
 	
 class Bonemeal:
@@ -543,18 +541,6 @@ nameserver 152.78.111.113
 			self.add_msg("FATAL: could not write to /etc/resolv.conf:")
 			self.add_msg(str(ex))
 			return
-
-		self.add_msg("FATAL: Could not download rhn-org-trusted-ssl-cert rpm:")
-		self.add_msg("FATAL: Could not download rhn-org-trusted-ssl-cert rpm:")
-		self.add_msg("FATAL: Could not download rhn-org-trusted-ssl-cert rpm:")
-		self.add_msg("FATAL: Could not download rhn-org-trusted-ssl-cert rpm:")
-		self.add_msg("FATAL: Could not download rhn-org-trusted-ssl-cert rpm:")
-		self.add_msg("FATAL: Could not download rhn-org-trusted-ssl-cert rpm:")
-		self.add_msg("FATAL: Could not download rhn-org-trusted-ssl-cert rpm:")
-		self.add_msg("FATAL: Could not download rhn-org-trusted-ssl-cert rpm:")
-		self.add_msg("FATAL: Could not download rhn-org-trusted-ssl-cert rpm:")
-		self.add_msg("FATAL: Could not download rhn-org-trusted-ssl-cert rpm:")
-
 
 		## REGISTER WITH RHN
 		self.add_msg("Preparing to register with RH Satellite")
