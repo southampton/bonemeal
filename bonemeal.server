@@ -42,6 +42,9 @@ ROUTERS_MAP = {
 }
 
 ## TODO rhel6 support
+## TODO a way to exit on fatal errors
+## or a fatal error screen would be better...which already exists...
+## should raise it via exception handling
 	
 class Bonemeal:
 
@@ -54,6 +57,7 @@ class Bonemeal:
 		]
 
 	start = True
+	finish = False
 
 ################################################################################
 
@@ -63,8 +67,6 @@ class Bonemeal:
 		fileHandler = logging.FileHandler('/root/install.log')
 		fileHandler.setLevel(logging.INFO)
 		self.log.addHandler(fileHandler)
-
-		## we dont syslog because that appears on the tty and messes graphics :(
 
 		# make tab work like down arrow
 		urwid.command_map['tab'] = 'cursor down'
@@ -92,8 +94,11 @@ class Bonemeal:
 
 	def unhandled_input(self,key):
 		if self.start:
-			self.view_sethostname()
+			#self.view_sethostname()
+			self.view_finish()
 			self.start = False
+		elif self.finish:
+			self.clean_finish()
 		elif key == 'Q':
 			raise urwid.ExitMainLoop()
 
@@ -400,6 +405,9 @@ class Bonemeal:
 		self.loop.draw_screen()
 
 	def configure(self):
+
+		self.warnings = 0
+
 		## work out OS version
 		(distname, distversion, distid) = platform.linux_distribution()
 
@@ -425,7 +433,8 @@ class Bonemeal:
 			else:
 				self.add_msg("Short hostname set to '" + self.hostname + "'")
 		elif self.release == 6:
-			## TODO fix
+			## TODO test new installer on RHEL6
+			## add support for RHEL6
 			pass
 
 		## set fqdn if not using dhcp
@@ -436,6 +445,7 @@ class Bonemeal:
 			except Exception as e:
 				self.add_msg("WARN: could not set fqdn in /etc/hosts:")
 				self.add_msg(str(e))
+				self.warnings = self.warnings + 1
 
 		## todo dns domain name for dhcp (/etc/dnsdomainname maybe?)
 
@@ -463,10 +473,12 @@ class Bonemeal:
 				self.add_msg("WARN: Because I can't read the existing config file THIS IS UNLIKELY TO WORK!")
 				self.add_msg(str(e))
 				netcfg = []
+				self.warnings = self.warnings + 1
 		else:
 			self.add_msg("WARN: No existing network configuration file found for interface " + self.netif)
 			self.add_msg("WARN: Because there is no existing config file THIS IS UNLIKELY TO WORK!")
 			netcfg = []
+			self.warnings = self.warnings + 1
 
 		self.add_msg("Generating new network configuration")
 
@@ -608,6 +620,7 @@ nameserver 152.78.111.113
 			self.add_msg("WARN: an error occured during yum update:")
 			self.add_msg(stdout)
 			self.add_msg(stderr)
+			self.warnings = self.warnings + 1
 
 		# a dependency on our use of puppet is lsb based facter variables
 		# so we install it first.
@@ -668,8 +681,6 @@ nameserver 152.78.111.113
 
 		self.add_msg("Installation Complete")
 
-		## disable setup
-		## reboot
 
 	def netcfg_remove(self,line):
 		removals = ['BOOTPROTO','DHCPCLASS','NM_CONTROLLED','IPADDR','NETMASK','GATEWAY','PEERDNS']
@@ -679,6 +690,47 @@ nameserver 152.78.111.113
 				return False
 
 		return True
+
+################################################################################
+## FINISH SCREEN
+
+	def view_finish(self):
+
+		self.warnings = 0
+
+		div = urwid.Divider()
+		bt = urwid.BigText('all done!', font=urwid.font.HalfBlock5x4Font())
+		btwp = urwid.Padding(bt, "center", 'clip')
+
+		txt = urwid.Text(u"Press any key to restart",align='center')
+
+		if self.warnings == 0:
+			pile1 = urwid.Pile([btwp,div,txt])
+		elif self.warnings == 1:
+			warn = urwid.Text("One warning was detected during installation. Please review /root/install.log on reboot to check these warnings.",align='center')
+			pile1 = urwid.Pile([btwp,div,txt,div,warn])
+		else:
+			warn = urwid.Text(str(self.warnings) + u" warnings were encountered during installation. Please review /root/install.log on reboot to check these warnings.",align='center')
+			pile1 = urwid.Pile([btwp,div,txt,div,warn])
+
+		pile1 = urwid.Filler(pile1, 'middle', None, 7)
+
+		frame = urwid.Frame(header=self.header, body=pile1, footer=self.footer)
+		self.switch_view(urwid.AttrMap(frame, 'bg'))
+		self.finish = True
+
+		## disable setup in systemctl
+		## reboot?
+
+	def clean_finish(self):
+		## disable the installer on next reboot
+		self.sysexec("/bin/rm -f /etc/systemd/system/multi-user.target.wants/bonemeal.service",shell=True)
+
+		## reboot
+		self.sysexec("/bin/reboot",shell=True)
+
+		## exit
+		raise urwid.ExitMainLoop()
 
 ################################################################################
 ## FATAL ERROR SCREEN
@@ -704,4 +756,4 @@ nameserver 152.78.111.113
 if '__main__'==__name__:
 	Bonemeal().main()
 	subprocess.call(["reset"])
-	print "bonemeal installer exit()"
+	print "bonemeal installer exit"
