@@ -14,7 +14,7 @@ from logging.handlers import SysLogHandler
 from netaddr import IPAddress, IPNetwork
 
 SETUP_TITLE           = ' UoS RHEL Server Installer';
-SETUP_VERSION         = '2015-08-18-3';
+SETUP_VERSION         = '2015-08-19-4';
 PE_INSTALL_CMD        = 'curl -k https://poc.puppet.soton.ac.uk:8140/packages/current/install.bash | bash'
 PUPPET_SSL_ROOT       = '/etc/puppetlabs/puppet/ssl/'
 PUPPET_BINARY         = '/usr/local/bin/puppet'
@@ -42,9 +42,6 @@ ROUTERS_MAP = {
 }
 
 ## TODO rhel6 support
-## TODO a way to exit on fatal errors
-## or a fatal error screen would be better...which already exists...
-## should raise it via exception handling
 	
 class Bonemeal:
 
@@ -418,16 +415,14 @@ class Bonemeal:
 			self.add_msg("Detected operating system as RHEL6")
 		else:
 			self.fatal("This operating system was not recognised. This installer supports RHEL6 or RHEL7.")
-			return None
+			return
 
 		## set hostname
 		if self.release == 7:
 			(code, stdout, stderr) = self.sysexec(["/bin/hostnamectl","set-hostname",self.hostname])
 
 			if code != 0:
-				self.add_msg("FATAL: could not set hostname:")
-				self.add_msg(stdout)
-				self.add_msg(stderr)
+				self.fatal("Setting hostname failed: \n" + stdout + "\n" + stderr)
 				return
 			else:
 				self.add_msg("Short hostname set to '" + self.hostname + "'")
@@ -442,7 +437,7 @@ class Bonemeal:
 				with open("/etc/hosts", "a") as hosts_file:
 					hosts_file.write(self.ipaddr + "\t" + self.fqdn + "\t" + self.hostname)
 			except Exception as e:
-				self.add_msg("WARN: could not set fqdn in /etc/hosts:")
+				self.add_msg("WARNING: could not set fqdn in /etc/hosts:")
 				self.add_msg(str(e))
 				self.warnings = self.warnings + 1
 
@@ -455,9 +450,7 @@ class Bonemeal:
 		(code, stdout, stderr) = self.sysexec(["/bin/systemctl","stop","NetworkManager"])
 
 		if code != 0:
-			self.add_msg("FATAL: could not stop network manager")
-			self.add_msg(stdout)
-			self.add_msg(stderr)
+			self.fatal("Could not stop the NetworkManager service: \n" + stdout + "\n" + stderr)
 			return
 
 		## check the config file exists (it should...)
@@ -468,14 +461,14 @@ class Bonemeal:
 				with open(network_config_file, "r") as netcfg_file:
 					netcfg = netcfg_file.readlines()
 			except Exception as e:
-				self.add_msg("WARN: could not read network config file " + network_config_file)
-				self.add_msg("WARN: Because I can't read the existing config file THIS IS UNLIKELY TO WORK!")
+				self.add_msg("WARNING: could not read network config file " + network_config_file)
+				self.add_msg("WARNING: Because I can't read the existing config file the network interface is unlikely to work")
 				self.add_msg(str(e))
 				netcfg = []
 				self.warnings = self.warnings + 1
 		else:
-			self.add_msg("WARN: No existing network configuration file found for interface " + self.netif)
-			self.add_msg("WARN: Because there is no existing config file THIS IS UNLIKELY TO WORK!")
+			self.add_msg("WARNING: No existing network configuration file found for interface " + self.netif)
+			self.add_msg("WARNING: Because there is no existing config file the network interface is unlikely to work")
 			netcfg = []
 			self.warnings = self.warnings + 1
 
@@ -498,9 +491,6 @@ class Bonemeal:
 		if self.release == 6:
 			netcfg.append("NM_CONTROLLED=no\n")
 
-		#for line in netcfg:
-		#	self.add_msg(line)
-
 		## now write out the file
 		self.add_msg("Saving new network configuration")
 		try:
@@ -509,8 +499,7 @@ class Bonemeal:
 					fp.write(line)
 			self.add_msg("Saved new network configuration")
 		except Exception as e:
-			self.add_msg("FATAL: could not write to network config file " + network_config_file)
-			self.add_msg(str(e))
+			self.fatal("Could not write to network config file " + network_config_file + ":\n" + str(ex))
 			return
 
 		## restart the network interface using ifdown/ifup
@@ -518,18 +507,14 @@ class Bonemeal:
 		(code, stdout, stderr) = self.sysexec(["/sbin/ifdown",self.netif])
 
 		if code != 0:
-			self.add_msg("FATAL: ifdown " + self.netif + " failed")
-			self.add_msg(stdout)
-			self.add_msg(stderr)
+			self.fatal("Could not stop network interface " + self.netif + ": \n" + stdout + "\n" + stderr)
 			return
 
 		self.add_msg("Starting network interface " + self.netif)
 		(code, stdout, stderr) = self.sysexec(["/sbin/ifup",self.netif])
 
 		if code != 0:
-			self.add_msg("FATAL: ifup " + self.netif + " failed")
-			self.add_msg(stdout)
-			self.add_msg(stderr)
+			self.fatal("Could not start network interface " + self.netif + ": \n" + stdout + "\n" + stderr)
 			return
 		else:
 			self.add_msg("Started network interface " + self.netif)
@@ -547,8 +532,7 @@ nameserver 152.78.111.81
 nameserver 152.78.111.113
 """)
 		except Exception as ex:
-			self.add_msg("FATAL: could not write to /etc/resolv.conf:")
-			self.add_msg(str(ex))
+			self.fatal("Could not write to /etc/resolv.conf:\n" + str(ex))
 			return
 
 		## REGISTER WITH RHN
@@ -556,47 +540,37 @@ nameserver 152.78.111.113
 		(code, stdout, stderr) = self.sysexec(["wget","-q","-O","/tmp/rhn-org-trusted-ssl-cert-1.0-1.noarch.rpm","https://rhn.soton.ac.uk/pub/rhn-org-trusted-ssl-cert-1.0-1.noarch.rpm","--no-check-certificate"])
 
 		if code != 0:
-			self.add_msg("FATAL: Could not download rhn-org-trusted-ssl-cert rpm:")
-			self.add_msg(stdout)
-			self.add_msg(stderr)
+			self.fatal("Could not download satellite SSL certificate RPM: \n" + stdout + "\n" + stderr)
 			return
 
 		## See if the rpm is already installed
 		(code, stdout, stderr) = self.sysexec(["/bin/rpm","-qi","rhn-org-trusted-ssl-cert"])
 
 		if code == 0:
-			self.add_msg("NOTICE: rhn-org-trusted-ssl-cert already installed")
+			self.add_msg("NOTICE: rhn-org-trusted-ssl-cert was found to be already installed")
 		else:
 			(code, stdout, stderr) = self.sysexec(["/bin/rpm","-ivh","/tmp/rhn-org-trusted-ssl-cert-1.0-1.noarch.rpm"])
 
 			if code != 0:
-				self.add_msg("FATAL: Could not install rhn-org-trusted-ssl-cert rpm:")
-				self.add_msg(stdout)
-				self.add_msg(stderr)
+				self.fatal("Could not install satellite SSL certificate RPM: \n" + stdout + "\n" + stderr)
 				return
 
 		(code, stdout, stderr) = self.sysexec(["/bin/wget","-q","-O","/etc/sysconfig/rhn/up2date","https://rhn.soton.ac.uk/pub/up2date","--no-check-certificate"])
 
 		if code != 0:
-			self.add_msg("FATAL: Could not download the up2date config file:")
-			self.add_msg(stdout)
-			self.add_msg(stderr)
+			self.fatal("Could not download up2date config file: \n" + stdout + "\n" + stderr)
 			return
 
 		(code, stdout, stderr) = self.sysexec(["/bin/wget","-q","-O","/etc/pki/rpm-gpg/ISOLUTIONS-PUBLIC-KEY","https://rhn.soton.ac.uk/pub/ISOLUTIONS-PUBLIC-KEY","--no-check-certificate"])
 
 		if code != 0:
-			self.add_msg("FATAL: Could not download the iSolutions rpm gpg key:")
-			self.add_msg(stdout)
-			self.add_msg(stderr)
+			self.fatal("Could not download the iSolutions RPM GPG key: \n" + stdout + "\n" + stderr)
 			return
 
 		(code, stdout, stderr) = self.sysexec(["/bin/rpm","--import","/etc/pki/rpm-gpg/ISOLUTIONS-PUBLIC-KEY"])
 
 		if code != 0:
-			self.add_msg("FATAL: Could not download the iSolutions rpm gpg key:")
-			self.add_msg(stdout)
-			self.add_msg(stderr)
+			self.fatal("Could not import the iSolutions RPM GPG key: \n" + stdout + "\n" + stderr)
 			return
 
 		self.add_msg("Registering with RH Satellite")
@@ -604,9 +578,7 @@ nameserver 152.78.111.113
 		(code, stdout, stderr) = self.sysexec('/sbin/rhnreg_ks --force --activationkey="1-768e8ff0478f68eecff9fc21b686c560"',shell=True) 
 
 		if code != 0:
-			self.add_msg("FATAL: Could not register with rhn.soton.ac.uk:")
-			self.add_msg(stdout)
-			self.add_msg(stderr)
+			self.fatal("Could not register with Red Hat Satellite: \n" + stdout + "\n" + stderr)
 			return
 		else:
 			self.add_msg("Satellite registration successful")
@@ -616,7 +588,7 @@ nameserver 152.78.111.113
 		(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y update",shell=True)
 
 		if code != 0:
-			self.add_msg("WARN: an error occured during yum update:")
+			self.add_msg("WARNING: non-zero exit occured during yum update:")
 			self.add_msg(stdout)
 			self.add_msg(stderr)
 			self.warnings = self.warnings + 1
@@ -627,9 +599,7 @@ nameserver 152.78.111.113
 		(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install redhat-lsb-core",shell=True)
 
 		if code != 0:
-			self.add_msg("FATAL: could not install redhat-lsb-core package:")
-			self.add_msg(stdout)
-			self.add_msg(stderr)
+			self.fatal("Could not install redhat-lsb-core: \n" + stdout + "\n" + stderr)
 			return
 
 		## INSTALL PUPPET
@@ -637,9 +607,7 @@ nameserver 152.78.111.113
 		(code, stdout, stderr) = self.sysexec(PE_INSTALL_CMD,shell=True)
 
 		if code != 0:
-			self.add_msg("FATAL: puppet installation returned an error:")
-			self.add_msg(stdout)
-			self.add_msg(stderr)
+			self.fatal("Could not install Puppet Enterprise: \n" + stdout + "\n" + stderr)
 			return
 
 		## STOP PUPPET DAEMON FOR NOW
@@ -647,9 +615,7 @@ nameserver 152.78.111.113
 		(code, stdout, stderr) = self.sysexec(["/bin/systemctl","stop","puppet"])
 
 		if code != 0:
-			self.add_msg("FATAL: puppet stop returned an error:")
-			self.add_msg(stdout)
-			self.add_msg(stderr)
+			self.fatal("Could not stop the puppet daemon: \n" + stdout + "\n" + stderr)
 			return
 
 		self.add_msg("Deploying new puppet certificate")
@@ -665,8 +631,7 @@ nameserver 152.78.111.113
 			with open(PUPPET_SSL_ROOT + "private_keys/" + self.fqdn + ".pem", "w") as fp:
 				fp.write(self.puppet_private_key)
 		except Exception as ex:
-			self.add_msg("FATAL: could not save puppet certificate files:")
-			self.add_msg(str(ex))
+			self.fatal("Could not save puppet certificate files:\n" + str(ex))
 			return
 
 		self.add_msg("Applying puppet configuration")
@@ -675,11 +640,10 @@ nameserver 152.78.111.113
 		(code, stdout, stderr) = self.sysexec(PUPPET_BINARY + " agent --test",shell=True)
 
 		if code != 0 and code != 2:
-			self.add_msg("FATAL: puppet policy failed. Please see the install.log on reboot.")
+			self.fatal("Puppet reported an error when applying policy to this system: \n" + stdout + "\n" + stderr)
 			return
 
-		self.add_msg("Installation Complete")
-
+		self.view_finish()
 
 	def netcfg_remove(self,line):
 		removals = ['BOOTPROTO','DHCPCLASS','NM_CONTROLLED','IPADDR','NETMASK','GATEWAY','PEERDNS']
@@ -735,9 +699,9 @@ nameserver 152.78.111.113
 	def view_fatal_error(self,message):
 		div = urwid.Divider()
 
-		bt = urwid.BigText('oh no!', font=urwid.font.HalfBlock5x4Font())
+		bt = urwid.BigText('uh oh...', font=urwid.font.HalfBlock5x4Font())
 		btwp = urwid.Padding(bt, "center", 'clip')
-		htxt = urwid.Text(u"A fatal error occured",align='left')
+		htxt = urwid.Text(u"A fatal error occured:",align='left')
 		mtxt = urwid.Text(message,align='left')
 
 		button = urwid.Button("Exit installer")
@@ -749,6 +713,8 @@ nameserver 152.78.111.113
 		fill = urwid.Filler(pile, 'top')
 		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
 		self.switch_view(urwid.AttrMap(frame, 'bg'))
+
+################################################################################
 
 if '__main__'==__name__:
 	Bonemeal().main()
