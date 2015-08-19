@@ -695,8 +695,6 @@ nameserver 152.78.111.113
 
 	def view_finish(self):
 
-		self.warnings = 0
-
 		div = urwid.Divider()
 		bt = urwid.BigText('all done!', font=urwid.font.HalfBlock5x4Font())
 		btwp = urwid.Padding(bt, "center", 'clip')
@@ -706,10 +704,10 @@ nameserver 152.78.111.113
 		if self.warnings == 0:
 			pile1 = urwid.Pile([btwp,div,txt])
 		elif self.warnings == 1:
-			warn = urwid.Text("One warning was detected during installation. Please review /root/install.log on reboot to check these warnings.",align='center')
+			warn = urwid.Text("One warning was detected during installation. \nPlease review /root/install.log on reboot to check these warnings.",align='center')
 			pile1 = urwid.Pile([btwp,div,txt,div,warn])
 		else:
-			warn = urwid.Text(str(self.warnings) + u" warnings were encountered during installation. Please review /root/install.log on reboot to check these warnings.",align='center')
+			warn = urwid.Text(str(self.warnings) + u" warnings were encountered during installation.\n Please review /root/install.log on reboot to check these warnings.",align='center')
 			pile1 = urwid.Pile([btwp,div,txt,div,warn])
 
 		pile1 = urwid.Filler(pile1, 'middle', None, 7)
