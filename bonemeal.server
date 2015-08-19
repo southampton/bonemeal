@@ -94,8 +94,7 @@ class Bonemeal:
 
 	def unhandled_input(self,key):
 		if self.start:
-			#self.view_sethostname()
-			self.view_finish()
+			self.view_sethostname()
 			self.start = False
 		elif self.finish:
 			self.clean_finish()
