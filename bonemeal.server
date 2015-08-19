@@ -396,9 +396,8 @@ class Bonemeal:
 	def add_msg(self,message):
 		self.log.info(message)
 		self.msgs.append(urwid.Text(" " + message.rstrip(),align='left'))
+		self.msgs_box.set_focus(len(self.msgs) -1)
 		self.loop.draw_screen()
-		#self.msgs_box.set_focus(len(self.msgs_box.body))
-		#self.msgs_box.set_focus(self.msgs.focus + 1)
 
 	def configure(self):
 		## work out OS version
