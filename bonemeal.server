@@ -9,7 +9,6 @@ import subprocess # for sysexec
 import requests   # for auth/register
 import syslog     # syslogging
 import logging
-from logging.handlers import SysLogHandler
 
 from netaddr import IPAddress, IPNetwork
 
@@ -60,10 +59,10 @@ class Bonemeal:
 
 	def main(self):
 		# logging
-		self.log = logging.getLogger("bonemeal")
+		self.log    = logging.getLogger("bonemeal")
 		fileHandler = logging.FileHandler('/root/install.log')
-		#fileHandler.setLevel(logging.INFO)
 		self.log.addHandler(fileHandler)
+		self.log.setLevel(logging.INFO)
 
 		# make tab work like down arrow
 		urwid.command_map['tab'] = 'cursor down'
