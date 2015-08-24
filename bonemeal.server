@@ -13,7 +13,7 @@ import logging
 from netaddr import IPAddress, IPNetwork
 
 SETUP_TITLE           = ' UoS RHEL Server Installer';
-SETUP_VERSION         = '2015-08-24-1';
+SETUP_VERSION         = '2015-08-24-4';
 PE_INSTALL_CMD        = 'curl -k https://poc.puppet.soton.ac.uk:8140/packages/current/install.bash | bash'
 PUPPET_SSL_ROOT       = '/etc/puppetlabs/puppet/ssl/'
 PUPPET_BINARY         = '/usr/local/bin/puppet'
@@ -61,6 +61,7 @@ class Bonemeal:
 		# logging
 		self.log    = logging.getLogger("bonemeal")
 		fileHandler = logging.FileHandler('/root/install.log')
+		fileHandler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'))
 		self.log.addHandler(fileHandler)
 		self.log.setLevel(logging.INFO)
 
@@ -348,6 +349,8 @@ class Bonemeal:
 		self.switch_view(urwid.AttrMap(frame, 'bg'))
 
 	def handle_auth(self,button):
+		self.auth_error.set_text("Contacting server, please wait... " + str(ex)
+
 		## python requests call with SSL...
 		try:
 			payload = {'hostname': self.fqdn, 'username': self.username.get_edit_text(), 'password': self.password.get_edit_text()}
@@ -678,9 +681,6 @@ nameserver 152.78.111.113
 		frame = urwid.Frame(header=self.header, body=pile1, footer=self.footer)
 		self.switch_view(urwid.AttrMap(frame, 'bg'))
 		self.finish = True
-
-		## disable setup in systemctl
-		## reboot?
 
 	def clean_finish(self):
 		## disable the installer on next reboot
