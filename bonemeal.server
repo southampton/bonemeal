@@ -349,7 +349,7 @@ class Bonemeal:
 		self.switch_view(urwid.AttrMap(frame, 'bg'))
 
 	def handle_auth(self,button):
-		self.auth_error.set_text("Contacting server, please wait... " + str(ex)
+		self.auth_error.set_text("Contacting server, please wait... " + str(ex))
 
 		## python requests call with SSL...
 		try:
