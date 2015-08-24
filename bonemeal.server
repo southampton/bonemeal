@@ -14,7 +14,7 @@ from logging.handlers import SysLogHandler
 from netaddr import IPAddress, IPNetwork
 
 SETUP_TITLE           = ' UoS RHEL Server Installer';
-SETUP_VERSION         = '2015-08-19-4';
+SETUP_VERSION         = '2015-08-24-1';
 PE_INSTALL_CMD        = 'curl -k https://poc.puppet.soton.ac.uk:8140/packages/current/install.bash | bash'
 PUPPET_SSL_ROOT       = '/etc/puppetlabs/puppet/ssl/'
 PUPPET_BINARY         = '/usr/local/bin/puppet'
@@ -62,7 +62,7 @@ class Bonemeal:
 		# logging
 		self.log = logging.getLogger("bonemeal")
 		fileHandler = logging.FileHandler('/root/install.log')
-		fileHandler.setLevel(logging.INFO)
+		#fileHandler.setLevel(logging.INFO)
 		self.log.addHandler(fileHandler)
 
 		# make tab work like down arrow
@@ -688,7 +688,7 @@ nameserver 152.78.111.113
 		self.sysexec("/bin/rm -f /etc/systemd/system/multi-user.target.wants/bonemeal.service",shell=True)
 
 		## reboot
-		self.sysexec("/bin/reboot",shell=True)
+		self.sysexec("/sbin/reboot")
 
 		## exit
 		raise urwid.ExitMainLoop()
