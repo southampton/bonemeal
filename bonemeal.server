@@ -9,6 +9,7 @@ import subprocess # for sysexec
 import requests   # for auth/register
 import syslog     # syslogging
 import logging
+import time
 
 from netaddr import IPAddress, IPNetwork
 
@@ -717,5 +718,7 @@ nameserver 152.78.111.113
 
 if '__main__'==__name__:
 	Bonemeal().main()
+	print "Please wait whilst loading the installer..."
+	time.sleep(5)
 	subprocess.call(["reset"])
 	print "bonemeal installer exit"
