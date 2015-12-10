@@ -717,8 +717,8 @@ nameserver 152.78.111.113
 ################################################################################
 
 if '__main__'==__name__:
-	Bonemeal().main()
 	print "Please wait whilst loading the installer..."
 	time.sleep(5)
 	subprocess.call(["reset"])
-	print "bonemeal installer exit"
+	Bonemeal().main()
+	subprocess.call(["reset"])
