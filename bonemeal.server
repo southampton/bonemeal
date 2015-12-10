@@ -486,7 +486,7 @@ class Bonemeal:
 			netcfg.append("BOOTPROTO=dhcp\n")
 		else:
 			netcfg.append("BOOTPROTO=static\n")
-			netcfg.append("IPADDRESS=" + self.ipaddr + "\n")
+			netcfg.append("IPADDR=" + self.ipaddr + "\n")
 			netcfg.append("NETMASK=" + str(self.netmask) + "\n")
 			netcfg.append("GATEWAY=" + self.router + "\n")
 
