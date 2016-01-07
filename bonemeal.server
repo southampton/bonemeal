@@ -14,11 +14,11 @@ import time
 from netaddr import IPAddress, IPNetwork
 
 SETUP_TITLE           = ' UoS RHEL Server Installer';
-SETUP_VERSION         = '2015-08-24-5';
-PE_INSTALL_CMD        = 'curl -k https://poc.puppet.soton.ac.uk:8140/packages/current/install.bash | bash'
+SETUP_VERSION         = '2016-01-07-08';
 PUPPET_SSL_ROOT       = '/etc/puppetlabs/puppet/ssl/'
-PUPPET_BINARY         = '/usr/local/bin/puppet'
-DIORITE_URL           = 'https://poc.puppet.soton.ac.uk:5000/getcert/user'
+PUPPET_BINARY         = '/opt/puppetlabs/bin/puppet'
+PUPPET_MASTER_FQDN    = 'judy.puppet.soton.ac.uk'
+DIORITE_URL           = 'https://judy.puppet.soton.ac.uk:5000/getcert/user'
 DIORITE_SSL_CA_FILE   = '/tmp/puppetca.pem'
 
 ## NETWORK CONFIGS
@@ -367,6 +367,7 @@ class Bonemeal:
 				self.puppet_private_key = self.json['private_key']
 				self.puppet_public_key  = self.json['public_key']
 				self.puppet_cert        = self.json['cert']
+				self.rhn_activation_key = self.json['rhn_activation_key']
 			except Exception as ex:
 				self.log.error("failed to parse response from registration server: " + str(ex))
 				self.auth_error.set_text("Failed to parse return response: " + str(ex))
@@ -432,7 +433,8 @@ class Bonemeal:
 		elif self.release == 6:
 			## TODO test new installer on RHEL6
 			## add support for RHEL6
-			pass
+			self.fatal("bonemeal does not yet support RHEL6. ")
+			return
 
 		## set fqdn if not using dhcp
 		if self.dhcp == False:
@@ -564,6 +566,18 @@ nameserver 152.78.111.113
 			self.fatal("Could not download up2date config file: \n" + stdout + "\n" + stderr)
 			return
 
+		self.add_msg("Registering with RH Satellite")
+
+		(code, stdout, stderr) = self.sysexec('/sbin/rhnreg_ks --force --activationkey="' + self.rhn_activation_key + '"',shell=True) 
+
+		if code != 0:
+			self.fatal("Could not register with Red Hat Satellite: \n" + stdout + "\n" + stderr)
+			return
+		else:
+			self.add_msg("Satellite registration successful")
+
+		## iSolutions GPG Key
+
 		(code, stdout, stderr) = self.sysexec(["/bin/wget","-q","-O","/etc/pki/rpm-gpg/ISOLUTIONS-PUBLIC-KEY","https://rhn.soton.ac.uk/pub/ISOLUTIONS-PUBLIC-KEY","--no-check-certificate"])
 
 		if code != 0:
@@ -576,15 +590,31 @@ nameserver 152.78.111.113
 			self.fatal("Could not import the iSolutions RPM GPG key: \n" + stdout + "\n" + stderr)
 			return
 
-		self.add_msg("Registering with RH Satellite")
-
-		(code, stdout, stderr) = self.sysexec('/sbin/rhnreg_ks --force --activationkey="1-768e8ff0478f68eecff9fc21b686c560"',shell=True) 
+		## EPEL 7 GPG Key
+		(code, stdout, stderr) = self.sysexec(["/bin/wget","-q","-O","/etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL","https://rhn.soton.ac.uk/pub/RPM-GPG-KEY-EPEL-7","--no-check-certificate"])
 
 		if code != 0:
-			self.fatal("Could not register with Red Hat Satellite: \n" + stdout + "\n" + stderr)
+			self.fatal("Could not download the EPEL RPM GPG key: \n" + stdout + "\n" + stderr)
 			return
-		else:
-			self.add_msg("Satellite registration successful")
+
+		(code, stdout, stderr) = self.sysexec(["/bin/rpm","--import","/etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL"])
+
+		if code != 0:
+			self.fatal("Could not import the EPEL RPM GPG key: \n" + stdout + "\n" + stderr)
+			return
+
+		## PuppetLabs Yum Repository GPG Key
+		(code, stdout, stderr) = self.sysexec(["/bin/wget","-q","-O","/etc/pki/rpm-gpg/RPM-GPG-KEY-PUPPET-COLLECTIONS","https://rhn.soton.ac.uk/pub/RPM-GPG-KEY-PUPPET-COLLECTIONS","--no-check-certificate"])
+
+		if code != 0:
+			self.fatal("Could not download the Puppet RPM GPG key: \n" + stdout + "\n" + stderr)
+			return
+
+		(code, stdout, stderr) = self.sysexec(["/bin/rpm","--import","/etc/pki/rpm-gpg/RPM-GPG-KEY-PUPPET-COLLECTIONS"])
+
+		if code != 0:
+			self.fatal("Could not import the Puppet RPM GPG key: \n" + stdout + "\n" + stderr)
+			return
 
 		## APPLY SOFTWARE UPDATES
 		self.add_msg("Installing software updates")
@@ -606,24 +636,35 @@ nameserver 152.78.111.113
 			return
 
 		## INSTALL PUPPET
-		self.add_msg("Installing Puppet Enterprise")
-		(code, stdout, stderr) = self.sysexec(PE_INSTALL_CMD,shell=True)
+		self.add_msg("Installing Puppet")
+		(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install puppet-agent",shell=True)
 
 		if code != 0:
-			self.fatal("Could not install Puppet Enterprise: \n" + stdout + "\n" + stderr)
+			self.fatal("Could not install Puppet: \n" + stdout + "\n" + stderr)
 			return
 
-		## STOP PUPPET DAEMON FOR NOW
-		self.add_msg("Stopping puppet daemon")
-		(code, stdout, stderr) = self.sysexec(["/bin/systemctl","stop","puppet"])
+		## SET CONFIG - server
+		self.add_msg("Setting Puppet master to " + PUPPET_MASTER_FQDN)
+		(code, stdout, stderr) = self.sysexec(PUPPET_BINARY + " config set server " + PUPPET_MASTER_FQDN,shell=True)
 
 		if code != 0:
-			self.fatal("Could not stop the puppet daemon: \n" + stdout + "\n" + stderr)
+			self.fatal("Could not set puppet master: \n" + stdout + "\n" + stderr)
 			return
 
-		self.add_msg("Deploying new puppet certificate")
+		## SET CONFIG - certname
+		self.add_msg("Setting Puppet certname to " + self.fqdn)
+		(code, stdout, stderr) = self.sysexec(PUPPET_BINARY + " config set certname	 " + self.fqdn,shell=True)
+
+		if code != 0:
+			self.fatal("Could not set puppet certname: \n" + stdout + "\n" + stderr)
+			return
+
+		## Run Puppet fingerprint. This sets up the SSL dir and generates some files but thats it.
+		self.add_msg("Setting up Puppet SSL directory")
+		(code, stdout, stderr) = self.sysexec(PUPPET_BINARY + " agent --Qfingerprint",shell=True)
 
 		## Deploy certificates and set certname option in puppet.conf
+		self.add_msg("Saving puppet certificates")
 		try:
 			with open(PUPPET_SSL_ROOT + "certs/" + self.fqdn + ".pem", "w") as fp:
 				fp.write(self.puppet_cert)
@@ -637,7 +678,7 @@ nameserver 152.78.111.113
 			self.fatal("Could not save puppet certificate files:\n" + str(ex))
 			return
 
-		self.add_msg("Applying puppet configuration")
+		self.add_msg("Applying puppet policy to the system")
 		## we run twice just to be sure. we only care about the exit code of the second
 		self.sysexec(PUPPET_BINARY + " agent --test",shell=True)
 		(code, stdout, stderr) = self.sysexec(PUPPET_BINARY + " agent --test",shell=True)
@@ -645,6 +686,16 @@ nameserver 152.78.111.113
 		if code != 0 and code != 2:
 			self.fatal("Puppet reported an error when applying policy to this system: \n" + stdout + "\n" + stderr)
 			return
+
+		## Set Puppet to run all the time
+		self.add_msg("Setting Puppet to launch on startup")
+		(code, stdout, stderr) = self.sysexec("systemctl enable puppet",shell=True)
+
+		if code != 0:
+			self.add_msg("WARNING: Failed to configure Puppet to launch on startupsystem")
+			self.add_msg(stdout)
+			self.add_msg(stderr)
+			self.warnings = self.warnings + 1
 
 		self.view_finish()
 
