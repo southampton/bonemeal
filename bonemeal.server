@@ -7,11 +7,9 @@ import os.path    # for install section
 import socket     # for get ip from hostname
 import subprocess # for sysexec
 import requests   # for auth/register
-import syslog     # syslogging
-import logging
-import time
-
-from netaddr import IPAddress, IPNetwork
+import logging    # for logging during installation
+import time       # for pausing at startup to avoid nasty boot messages
+from netaddr import IPAddress, IPNetwork # for network configuration
 
 SETUP_TITLE           = ' UoS RHEL Server Installer';
 SETUP_VERSION         = '2016-01-08-01';
