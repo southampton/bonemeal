@@ -12,7 +12,7 @@ import time       # for pausing at startup to avoid nasty boot messages
 from netaddr import IPAddress, IPNetwork # for network configuration
 
 SETUP_TITLE           = ' UoS RHEL Server Installer';
-SETUP_VERSION         = '2016-01-08-01';
+SETUP_VERSION         = '2016-01-08-02';
 PUPPET_SSL_ROOT       = '/etc/puppetlabs/puppet/ssl/'
 PUPPET_BINARY         = '/opt/puppetlabs/bin/puppet'
 PUPPET_MASTER_FQDN    = 'judy.puppet.soton.ac.uk'
