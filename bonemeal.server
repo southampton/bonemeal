@@ -12,7 +12,7 @@ import time       # for pausing at startup to avoid nasty boot messages
 from netaddr import IPAddress, IPNetwork # for network configuration
 
 SETUP_TITLE           = ' UoS RHEL Server Installer';
-SETUP_VERSION         = '2016-01-08-02';
+SETUP_VERSION         = '2016-01-08-03';
 PUPPET_SSL_ROOT       = '/etc/puppetlabs/puppet/ssl/'
 PUPPET_BINARY         = '/opt/puppetlabs/bin/puppet'
 PUPPET_MASTER_FQDN    = 'judy.puppet.soton.ac.uk'
@@ -659,7 +659,7 @@ nameserver 152.78.111.113
 
 		## Run Puppet fingerprint. This sets up the SSL dir and generates some files but thats it.
 		self.add_msg("Setting up Puppet SSL directory")
-		(code, stdout, stderr) = self.sysexec(PUPPET_BINARY + " agent --Qfingerprint",shell=True)
+		(code, stdout, stderr) = self.sysexec(PUPPET_BINARY + " agent --fingerprint",shell=True)
 
 		## Deploy certificates and set certname option in puppet.conf
 		self.add_msg("Saving puppet certificates")
