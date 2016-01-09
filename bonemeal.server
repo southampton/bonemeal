@@ -1,6 +1,10 @@
 #!/usr/bin/python
 
-import urwid
+CONFIG_FILE = '/etc/bonemeal.conf'
+
+## DO NOT EDIT BELOW THIS LINE #################################################
+
+import urwid      # the text-mode UI toolkit bonemeal uses
 import platform   # for get hostname and configure
 import os         # for get network interfaces
 import os.path    # for install section
@@ -10,17 +14,12 @@ import requests   # for auth/register
 import logging    # for logging during installation
 import time       # for pausing at startup to avoid nasty boot messages
 from netaddr import IPAddress, IPNetwork # for network configuration
-
-SETUP_TITLE           = ' UoS RHEL Server Installer';
-SETUP_VERSION         = '2016-01-09-01';
-PUPPET_SSL_ROOT       = '/etc/puppetlabs/puppet/ssl/'
-PUPPET_BINARY         = '/opt/puppetlabs/bin/puppet'
-PUPPET_MASTER_FQDN    = 'judy.puppet.soton.ac.uk'
-DIORITE_URL           = 'https://judy.puppet.soton.ac.uk:5000/getcert/user'
-DIORITE_SSL_CA_FILE   = '/tmp/puppetca.pem'
+import ConfigParser # for config
+import traceback   # for exception handling 
 
 ## NETWORK CONFIGS
-NETWORKS_LIST = [IPNetwork("152.78.128.0/22"),
+NETWORKS_LIST = [
+	IPNetwork("152.78.128.0/22"),
 	IPNetwork("152.78.136.0/22"),
 	IPNetwork("192.168.168.0/22"),
 	IPNetwork("152.78.140.0/23"),
@@ -39,10 +38,21 @@ ROUTERS_MAP = {
 	"10.18.36.0/22":    '10.18.39.254',
 }
 
-## TODO rhel6 support
-	
 class Bonemeal:
+	version       = '2016-01-09-03'
 
+	# [bonemeal]
+	config = {
+		'title'         : 'RHEL Server Setup',
+		'log_file'      : '/root/bonemeal-installer.log',
+		'puppet_ssldir' : '/etc/puppetlabs/puppet/ssl/',
+		'puppet_binary' : '/opt/puppetlabs/bin/puppet',
+		'puppet_master' : 'puppet',
+		'diorite_url'   : 'https://puppet:5000/getcert/user',
+		'diorite_ca'    : '/tmp/puppetca.pem',
+	}
+
+	## colour setup
 	palette = [
 		('edit', 'black', 'light gray'),
         ('header',       'white',      'dark red',   'bold'),
@@ -51,24 +61,48 @@ class Bonemeal:
 		('error','yellow','dark blue')
 		]
 
-	start = True
-	finish = False
+	## state handling for unhandled input
+	start   = True
+	finish  = False
+
 
 ################################################################################
 
 	def main(self):
+		print "[bonemeal] Please wait whilst starting the installer..."
+
+		# load configuration from file
+		configParser = ConfigParser.RawConfigParser()
+
+		try:
+			configParser.readfp(open(CONFIG_FILE))
+		except Exception as ex:
+			print "[bonemeal] Could not read from config file " + CONFIG_FILE + ": " + str(ex)
+			print "[bonemeal] Starting with default options. Press Ctrl+C to cancel."
+			time.sleep(5)
+
+		# try to load config options if they exist - overwriting defaults
+		for key in self.config.keys():
+			if configParser.has_option('bonemeal',key):
+				self.config[key] = configParser.get('bonemeal',key)
+
 		# logging
 		self.log    = logging.getLogger("bonemeal")
-		fileHandler = logging.FileHandler('/root/install.log')
+		fileHandler = logging.FileHandler(self.config['log_file'])
 		fileHandler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'))
 		self.log.addHandler(fileHandler)
 		self.log.setLevel(logging.INFO)
 
-		# make tab work like down arrow
+		# make tab work like down arrow...sort of.
 		urwid.command_map['tab'] = 'cursor down'
 
 		## log the startup
-		self.log.info("bonemeal installer version " + SETUP_VERSION + " starting up")
+		self.log.info("bonemeal installer version " + self.version + " starting up")
+
+		# Sleep for 5 seconds, then reset the screen, so as to wait for 
+		# annoying boot kernel messages and then clear them away
+		time.sleep(5)
+		subprocess.call(["reset"])
 
 		self.setup_header_footer()
 		self.loop = urwid.MainLoop(self.view_default(), self.palette, unhandled_input=self.unhandled_input)
@@ -83,9 +117,9 @@ class Bonemeal:
 		self.loop.draw_screen()
 
 	def setup_header_footer(self):
-		self.header_text = urwid.Text(SETUP_TITLE)
+		self.header_text = urwid.Text(" " + self.config['title'])
 		self.header = urwid.AttrWrap(self.header_text, 'header')
-		self.footer_text = urwid.Text("bonemeal installer " + SETUP_VERSION)
+		self.footer_text = urwid.Text("bonemeal installer " + self.version)
 		self.footer = urwid.AttrWrap(self.footer_text, 'header')
 
 	def unhandled_input(self,key):
@@ -353,7 +387,7 @@ class Bonemeal:
 		## python requests call with SSL...
 		try:
 			payload = {'ident': 'el7s', 'hostname': self.fqdn, 'username': self.username.get_edit_text(), 'password': self.password.get_edit_text()}
-			r = requests.post(DIORITE_URL, data=payload, verify = DIORITE_SSL_CA_FILE)
+			r = requests.post(self.config['diorite_url'], data=payload, verify = self.config['diorite_ca'])
 		except Exception as ex:
 			self.log.error("error contacting registration server: " + str(ex))
 			self.auth_error.set_text("Error contacting registration server: " + str(ex))
@@ -642,8 +676,8 @@ nameserver 152.78.111.113
 			return
 
 		## SET CONFIG - server
-		self.add_msg("Setting Puppet master to " + PUPPET_MASTER_FQDN)
-		(code, stdout, stderr) = self.sysexec(PUPPET_BINARY + " config set server " + PUPPET_MASTER_FQDN,shell=True)
+		self.add_msg("Setting Puppet master to " + self.config['puppet_master'])
+		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " config set server " + self.config['puppet_master'],shell=True)
 
 		if code != 0:
 			self.fatal("Could not set puppet master: \n" + stdout + "\n" + stderr)
@@ -651,7 +685,7 @@ nameserver 152.78.111.113
 
 		## SET CONFIG - certname
 		self.add_msg("Setting Puppet certname to " + self.fqdn)
-		(code, stdout, stderr) = self.sysexec(PUPPET_BINARY + " config set certname	 " + self.fqdn,shell=True)
+		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " config set certname	 " + self.fqdn,shell=True)
 
 		if code != 0:
 			self.fatal("Could not set puppet certname: \n" + stdout + "\n" + stderr)
@@ -659,18 +693,18 @@ nameserver 152.78.111.113
 
 		## Run Puppet fingerprint. This sets up the SSL dir and generates some files but thats it.
 		self.add_msg("Setting up Puppet SSL directory")
-		(code, stdout, stderr) = self.sysexec(PUPPET_BINARY + " agent --fingerprint",shell=True)
+		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " agent --fingerprint",shell=True)
 
 		## Deploy certificates and set certname option in puppet.conf
 		self.add_msg("Saving puppet certificates")
 		try:
-			with open(PUPPET_SSL_ROOT + "certs/" + self.fqdn + ".pem", "w") as fp:
+			with open(self.config['puppet_ssldir'] + "certs/" + self.fqdn + ".pem", "w") as fp:
 				fp.write(self.puppet_cert)
 
-			with open(PUPPET_SSL_ROOT + "public_keys/" + self.fqdn + ".pem", "w") as fp:
+			with open(self.config['puppet_ssldir'] + "public_keys/" + self.fqdn + ".pem", "w") as fp:
 				fp.write(self.puppet_public_key)
 
-			with open(PUPPET_SSL_ROOT + "private_keys/" + self.fqdn + ".pem", "w") as fp:
+			with open(self.config['puppet_ssldir'] + "private_keys/" + self.fqdn + ".pem", "w") as fp:
 				fp.write(self.puppet_private_key)
 		except Exception as ex:
 			self.fatal("Could not save puppet certificate files:\n" + str(ex))
@@ -678,8 +712,8 @@ nameserver 152.78.111.113
 
 		self.add_msg("Applying puppet policy to the system")
 		## we run twice just to be sure. we only care about the exit code of the second
-		self.sysexec(PUPPET_BINARY + " agent --test",shell=True)
-		(code, stdout, stderr) = self.sysexec(PUPPET_BINARY + " agent --test",shell=True)
+		self.sysexec(self.config['puppet_binary'] + " agent --test",shell=True)
+		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " agent --test",shell=True)
 
 		if code != 0 and code != 2:
 			self.fatal("Puppet reported an error when applying policy to this system: \n" + stdout + "\n" + stderr)
@@ -766,8 +800,12 @@ nameserver 152.78.111.113
 ################################################################################
 
 if '__main__'==__name__:
-	print "[bonemeal] Please wait whilst starting the installer..."
-	time.sleep(5)
-	subprocess.call(["reset"])
-	Bonemeal().main()
-	subprocess.call(["reset"])
+	try:
+		Bonemeal().main()
+		subprocess.call(["reset"])
+	except Exception as ex:
+		print "--------------------------------------------------------------------------------"
+		print "A critical error occured in bonemeal! Details will be shown below for 2 minutes: \n"
+		traceback.print_exc()
+		print "--------------------------------------------------------------------------------"
+		time.sleep(120)
