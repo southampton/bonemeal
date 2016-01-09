@@ -15,7 +15,7 @@ import logging    # for logging during installation
 import time       # for pausing at startup to avoid nasty boot messages
 from netaddr import IPAddress, IPNetwork # for network configuration
 import ConfigParser # for config
-import traceback   # for exception handling 
+import traceback   # for exception handling
 
 ## NETWORK CONFIGS
 NETWORKS_LIST = [
@@ -39,7 +39,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-01-09-03'
+	version       = '2016-01-09-04'
 
 	# [bonemeal]
 	config = {
@@ -104,8 +104,13 @@ class Bonemeal:
 		time.sleep(5)
 		subprocess.call(["reset"])
 
+		## Set a nice header/footer on all pages
 		self.setup_header_footer()
+
+		## Load the main loop
 		self.loop = urwid.MainLoop(self.view_default(), self.palette, unhandled_input=self.unhandled_input)
+
+		## Run the loop		
 		self.loop.run()
 
 	def fatal(self,message):
@@ -124,8 +129,13 @@ class Bonemeal:
 
 	def unhandled_input(self,key):
 		if self.start:
-			self.view_sethostname()
-			self.start = False
+	
+			## Check the OS is supported
+			if not self.supported_os():
+				self.fatal("Your operating system is not supported by this installer. Only RHEL6 and RHEL7 are supported.")
+			else:
+				self.view_sethostname()
+				self.start = False
 		elif self.finish:
 			self.clean_finish()
 		elif key == 'Q':
@@ -217,7 +227,7 @@ class Bonemeal:
 		self.switch_view(urwid.AttrMap(frame, 'bg'))
 
 	def handle_hostname(self,button):
-		self.hostname = self.hostname_edit.get_edit_text()
+		self.hostname = self.hostname_edit.get_edit_text().lower()
 
 		if self.hostname.endswith(".soton.ac.uk"):
 			self.log.info("stripping .soton.ac.uk from given hostname")
@@ -262,7 +272,6 @@ class Bonemeal:
 
 		listbox = urwid.ListBox(urwid.SimpleFocusListWalker(btns))
 		listbox = urwid.BoxAdapter(listbox,len(interfaces))
-		# so clayton made me write the max thing. what it does is get the max width/length of the strings in the network list
 		listbox = urwid.Padding(listbox, "left", width=max([len(name) for name in interfaces]) + 4)
 
 		div = urwid.Divider()
@@ -384,9 +393,17 @@ class Bonemeal:
 	def handle_auth(self,button):
 		self.auth_error.set_text("Contacting server, please wait...")
 
+		## What ident to send for what version?
+		if self.release == 7:
+			ident = 'el7s'
+		elif self.release == 6:
+			ident = 'el6s'
+		else:
+			ident = 'unknown'
+
 		## python requests call with SSL...
 		try:
-			payload = {'ident': 'el7s', 'hostname': self.fqdn, 'username': self.username.get_edit_text(), 'password': self.password.get_edit_text()}
+			payload = {'ident': ident, 'hostname': self.fqdn, 'username': self.username.get_edit_text(), 'password': self.password.get_edit_text()}
 			r = requests.post(self.config['diorite_url'], data=payload, verify = self.config['diorite_ca'])
 		except Exception as ex:
 			self.log.error("error contacting registration server: " + str(ex))
@@ -402,7 +419,7 @@ class Bonemeal:
 				self.rhn_activation_key = self.json['rhn_activation_key']
 			except Exception as ex:
 				self.log.error("failed to parse response from registration server: " + str(ex))
-				self.auth_error.set_text("Failed to parse return response: " + str(ex))
+				self.auth_error.set_text("Failed to understand return response: " + str(ex))
 				return
 
 			self.view_go()
@@ -437,23 +454,11 @@ class Bonemeal:
 		self.loop.draw_screen()
 
 	def configure(self):
-
 		self.warnings = 0
 
-		## work out OS version
-		(distname, distversion, distid) = platform.linux_distribution()
+		## 1. HOSTNAME #########################################################
 
-		if distid == 'Maipo':
-			self.release = 7
-			self.add_msg("Detected operating system as RHEL7")
-		elif distid == 'Santiago':
-			self.release = 6
-			self.add_msg("Detected operating system as RHEL6")
-		else:
-			self.fatal("This operating system was not recognised. This installer supports RHEL6 or RHEL7.")
-			return
-
-		## set hostname
+		## RHEL7 hostname
 		if self.release == 7:
 			(code, stdout, stderr) = self.sysexec(["/bin/hostnamectl","set-hostname",self.hostname])
 
@@ -461,12 +466,57 @@ class Bonemeal:
 				self.fatal("Setting hostname failed: \n" + stdout + "\n" + stderr)
 				return
 			else:
-				self.add_msg("Short hostname set to '" + self.hostname + "'")
+				self.add_msg("Hostname set to '" + self.hostname + "'")
+
+		## RHEL6 hostname
 		elif self.release == 6:
-			## TODO test new installer on RHEL6
-			## add support for RHEL6
-			self.fatal("bonemeal does not yet support RHEL6. ")
-			return
+			network_config_file = "/etc/sysconfig/network"
+			self.add_msg("Reading system network configuration (" + network_config_file + ")")
+
+			if os.path.isfile(network_config_file): 
+				try:
+					with open(network_config_file, "r") as netcfg_file:
+						netcfg = netcfg_file.readlines()
+				except Exception as e:
+					self.add_msg("WARNING: could not read the system network config file " + network_config_file)
+					self.add_msg("WARNING: Because I can't read the existing config file the system configuration might not work")
+					self.add_msg(str(e))
+					netcfg = []
+					self.warnings = self.warnings + 1
+			else:
+				self.add_msg("WARNING: There is no system network config file on this system!")
+				self.add_msg("WARNING: Because I can't read the existing config file the system configuration might not work")
+				netcfg = []
+				self.warnings = self.warnings + 1
+
+			found_hostname = False
+			for line in netcfg:
+				if line.startswith('HOSTNAME'):
+					found_hostname = True
+					line = "HOSTNAME=" + self.hostname
+
+			if not found_hostname:
+				netcfg.append("HOSTNAME=" + self.hostname)
+
+			self.add_msg("Saving new system network configuration with updated hostname")
+			try:
+				with open(network_config_file, "w") as fp:
+					for line in netcfg:
+						fp.write(line)
+				self.add_msg("Saved new system network configuration")
+			except Exception as e:
+				self.fatal("Could not write to system network config file " + network_config_file + ":\n" + str(ex))
+				return
+
+			## Set hostname live now as well 
+			self.add_msg("Setting runtime hostname")
+			(code, stdout, stderr) = self.sysexec(["/bin/hostname",self.hostname])
+
+			if code != 0:
+				self.fatal("Could not set runtime hostname: \n" + stdout + "\n" + stderr)
+				return
+
+		## 2. FQDN #############################################################
 
 		## set fqdn if not using dhcp
 		if self.dhcp == False:
@@ -478,9 +528,13 @@ class Bonemeal:
 				self.add_msg(str(e))
 				self.warnings = self.warnings + 1
 
-		## todo dns domain name for dhcp (/etc/dnsdomainname maybe?)
+			## TODO delete 'dhcp' hostnames from /etc/hosts? maybe.
 
-		## do networking config file
+		## TODO dns domain name for dhcp (/etc/dnsdomainname maybe?)
+		## mostly for sandbox...
+
+
+		## 3. NETWORK ##########################################################
 
 		## restart the network interface using ifdown/ifup
 		self.add_msg("Stopping network manager")
@@ -558,7 +612,7 @@ class Bonemeal:
 
 		## because we set PEERDNS=no in the network settings the system has no idea, even with dhcp, what dns servers to use.
 		## puppet will set them later, but we still need dns servers before that, so we'll write out a sample
-		## resolv.conf to bootstrap us to puppet.
+		## resolv.conf to bootstrap us to the puppet stage.
 		## we set PEERDNS=no because puppet manages resolv.conf normally and we dont want the network and puppet fighting over the resolv.conf file.
 		self.log.info("Saving temporary resolv.conf file")
 		try:
@@ -572,7 +626,8 @@ nameserver 152.78.111.113
 			self.fatal("Could not write to /etc/resolv.conf:\n" + str(ex))
 			return
 
-		## REGISTER WITH RHN
+		## 4. RED HAT NETWORK ##################################################
+
 		self.add_msg("Preparing to register with RH Satellite")
 		(code, stdout, stderr) = self.sysexec(["wget","-q","-O","/tmp/rhn-org-trusted-ssl-cert-1.0-1.noarch.rpm","https://rhn.soton.ac.uk/pub/rhn-org-trusted-ssl-cert-1.0-1.noarch.rpm","--no-check-certificate"])
 
@@ -608,8 +663,9 @@ nameserver 152.78.111.113
 		else:
 			self.add_msg("Satellite registration successful")
 
-		## iSolutions GPG Key
+		## 5. RPM GPG KEYS #####################################################
 
+		## iSolutions GPG Key
 		(code, stdout, stderr) = self.sysexec(["/bin/wget","-q","-O","/etc/pki/rpm-gpg/ISOLUTIONS-PUBLIC-KEY","https://rhn.soton.ac.uk/pub/ISOLUTIONS-PUBLIC-KEY","--no-check-certificate"])
 
 		if code != 0:
@@ -622,8 +678,13 @@ nameserver 152.78.111.113
 			self.fatal("Could not import the iSolutions RPM GPG key: \n" + stdout + "\n" + stderr)
 			return
 
-		## EPEL 7 GPG Key
-		(code, stdout, stderr) = self.sysexec(["/bin/wget","-q","-O","/etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL","https://rhn.soton.ac.uk/pub/RPM-GPG-KEY-EPEL-7","--no-check-certificate"])
+		if self.release = 7:
+			epel_key = "https://rhn.soton.ac.uk/pub/RPM-GPG-KEY-EPEL-7"
+		elif self.release = 6:
+			epel_key = "https://rhn.soton.ac.uk/pub/RPM-GPG-KEY-EPEL"
+
+		## EPEL GPG Key
+		(code, stdout, stderr) = self.sysexec(["/bin/wget","-q","-O","/etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL",epel_key,"--no-check-certificate"])
 
 		if code != 0:
 			self.fatal("Could not download the EPEL RPM GPG key: \n" + stdout + "\n" + stderr)
@@ -648,7 +709,8 @@ nameserver 152.78.111.113
 			self.fatal("Could not import the Puppet RPM GPG key: \n" + stdout + "\n" + stderr)
 			return
 
-		## APPLY SOFTWARE UPDATES
+		## 6. YUM UPDATE #######################################################
+
 		self.add_msg("Installing software updates")
 		(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y update",shell=True)
 
@@ -657,6 +719,8 @@ nameserver 152.78.111.113
 			self.add_msg(stdout)
 			self.add_msg(stderr)
 			self.warnings = self.warnings + 1
+
+		## 7. PUPPET ###########################################################
 
 		# a dependency on our use of puppet is lsb based facter variables
 		# so we install it first.
@@ -754,10 +818,10 @@ nameserver 152.78.111.113
 		if self.warnings == 0:
 			pile1 = urwid.Pile([btwp,div,txt])
 		elif self.warnings == 1:
-			warn = urwid.Text("One warning was detected during installation. \nPlease review /root/install.log on reboot to check these warnings.",align='center')
+			warn = urwid.Text("One warning was detected during installation. \nPlease review " + self.config['log_file'] + " on reboot to check these warnings.",align='center')
 			pile1 = urwid.Pile([btwp,div,txt,div,warn])
 		else:
-			warn = urwid.Text(str(self.warnings) + u" warnings were encountered during installation.\n Please review /root/install.log on reboot to check these warnings.",align='center')
+			warn = urwid.Text(str(self.warnings) + u" warnings were encountered during installation.\n Please review " + self.config['log_file'] +  on reboot to check these warnings.",align='center')
 			pile1 = urwid.Pile([btwp,div,txt,div,warn])
 
 		pile1 = urwid.Filler(pile1, 'middle', None, 7)
@@ -767,8 +831,10 @@ nameserver 152.78.111.113
 		self.finish = True
 
 	def clean_finish(self):
-		## disable the installer on next reboot
-		self.sysexec("/bin/rm -f /etc/systemd/system/multi-user.target.wants/bonemeal.service",shell=True)
+		if self.release == 7:
+			self.sysexec("/bin/rm -f /etc/systemd/system/multi-user.target.wants/bonemeal.service",shell=True)
+		elif self.release == 6:
+			self.sysexec("/sbin/chkconfig setup off",shell=True)
 
 		## reboot
 		self.sysexec("/sbin/reboot")
@@ -798,8 +864,31 @@ nameserver 152.78.111.113
 		self.switch_view(urwid.AttrMap(frame, 'bg'))
 
 ################################################################################
+## Detect OS version
 
-if '__main__'==__name__:
+	def supported_os(self):
+
+		## work out OS version
+		(distname, distversion, distid) = platform.linux_distribution()
+
+		if distid == 'Maipo':
+			self.release = 7
+			self.log.info("Detected operating system as RHEL7: " + distname + " " + distversion + " " + distid)
+			return True
+		elif distid == 'Santiago':
+			self.release = 6
+			self.log.info("Detected operating system as RHEL6: " + distname + " " + distversion + " " + distid)
+			return True
+		else:
+			self.log.error("Detected operating system as: " + distname + " " + distversion + " " + distid)
+			return False
+
+################################################################################
+
+if '__main__' == __name__:
+	## plymouth should not be running or this installer won't work very well
+	subprocess.call(["/usr/bin/plymouth","quit"])
+
 	try:
 		Bonemeal().main()
 		subprocess.call(["reset"])
@@ -808,4 +897,4 @@ if '__main__'==__name__:
 		print "A critical error occured in bonemeal! Details will be shown below for 2 minutes: \n"
 		traceback.print_exc()
 		print "--------------------------------------------------------------------------------"
-		time.sleep(120)
+		time.sleep(120)/usr/bin/plymouth --hide-splash
