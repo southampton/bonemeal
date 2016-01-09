@@ -39,7 +39,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-01-09-04'
+	version       = '2016-01-09-07'
 
 	# [bonemeal]
 	config = {
@@ -545,12 +545,13 @@ class Bonemeal:
 				self.fatal("Could not stop the NetworkManager service: \n" + stdout + "\n" + stderr)
 				return
 		elif self.release == 6:
-			self.add_msg("Stopping network manager")
-			(code, stdout, stderr) = self.sysexec(["/sbin/service","NetworkManager","stop"])
+			if os.path.exists("/etc/init.d/NetworkManager"):
+				self.add_msg("Stopping network manager")
+				(code, stdout, stderr) = self.sysexec(["/sbin/service","NetworkManager","stop"])
 
-			if code != 0:
-				self.fatal("Could not stop the NetworkManager service: \n" + stdout + "\n" + stderr)
-				return
+				if code != 0:
+					self.fatal("Could not stop the NetworkManager service: \n" + stdout + "\n" + stderr)
+					return
 
 		## check the config file exists (it should...)
 		self.add_msg("Attempting to read existing network configuration")
