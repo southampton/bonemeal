@@ -1,8 +1,0 @@
-#!/bin/bash
-
-mkdir -p /mnt/build
-mount -o nolock install.soton.ac.uk:/data/redhat/kickstart/el7-server64/setup/ /mnt/build
-cp /mnt/build/bonemeal.server /sbin/soton-setup-run
-chmod 0755 /sbin/soton-setup-run
-/sbin/soton-setup-run
-umount /mnt/build

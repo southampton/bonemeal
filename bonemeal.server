@@ -12,7 +12,7 @@ import time       # for pausing at startup to avoid nasty boot messages
 from netaddr import IPAddress, IPNetwork # for network configuration
 
 SETUP_TITLE           = ' UoS RHEL Server Installer';
-SETUP_VERSION         = '2016-01-08-03';
+SETUP_VERSION         = '2016-01-09-01';
 PUPPET_SSL_ROOT       = '/etc/puppetlabs/puppet/ssl/'
 PUPPET_BINARY         = '/opt/puppetlabs/bin/puppet'
 PUPPET_MASTER_FQDN    = 'judy.puppet.soton.ac.uk'
@@ -766,7 +766,7 @@ nameserver 152.78.111.113
 ################################################################################
 
 if '__main__'==__name__:
-	print "Please wait whilst loading the installer..."
+	print "[bonemeal] Please wait whilst starting the installer..."
 	time.sleep(5)
 	subprocess.call(["reset"])
 	Bonemeal().main()
