@@ -39,7 +39,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-01-09-08'
+	version       = '2016-01-09-09'
 
 	# [bonemeal]
 	config = {
@@ -664,7 +664,7 @@ nameserver 152.78.111.113
 
 		self.add_msg("Registering with RH Satellite")
 
-		(code, stdout, stderr) = self.sysexec('/sbin/rhnreg_ks --force --activationkey="' + self.rhn_activation_key + '"',shell=True) 
+		(code, stdout, stderr) = self.sysexec('/usr/sbin/rhnreg_ks --force --activationkey="' + self.rhn_activation_key + '"',shell=True) 
 
 		if code != 0:
 			self.fatal("Could not register with Red Hat Satellite: \n" + stdout + "\n" + stderr)
