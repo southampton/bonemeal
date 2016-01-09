@@ -537,12 +537,20 @@ class Bonemeal:
 		## 3. NETWORK ##########################################################
 
 		## restart the network interface using ifdown/ifup
-		self.add_msg("Stopping network manager")
-		(code, stdout, stderr) = self.sysexec(["/bin/systemctl","stop","NetworkManager"])
+		if self.release == 7:
+			self.add_msg("Stopping network manager")
+			(code, stdout, stderr) = self.sysexec(["/bin/systemctl","stop","NetworkManager"])
 
-		if code != 0:
-			self.fatal("Could not stop the NetworkManager service: \n" + stdout + "\n" + stderr)
-			return
+			if code != 0:
+				self.fatal("Could not stop the NetworkManager service: \n" + stdout + "\n" + stderr)
+				return
+		elif self.release == 6:
+			self.add_msg("Stopping network manager")
+			(code, stdout, stderr) = self.sysexec(["/sbin/service","NetworkManager","stop"])
+
+			if code != 0:
+				self.fatal("Could not stop the NetworkManager service: \n" + stdout + "\n" + stderr)
+				return
 
 		## check the config file exists (it should...)
 		self.add_msg("Attempting to read existing network configuration")
@@ -785,13 +793,23 @@ nameserver 152.78.111.113
 
 		## Set Puppet to run all the time
 		self.add_msg("Setting Puppet to launch on startup")
-		(code, stdout, stderr) = self.sysexec("systemctl enable puppet",shell=True)
+		if self.release == 7:
+			(code, stdout, stderr) = self.sysexec(["/bin/systemctl","enable","puppet"])
 
-		if code != 0:
-			self.add_msg("WARNING: Failed to configure Puppet to launch on startupsystem")
-			self.add_msg(stdout)
-			self.add_msg(stderr)
-			self.warnings = self.warnings + 1
+			if code != 0:
+				self.add_msg("WARNING: Failed to configure Puppet to launch on startupsystem")
+				self.add_msg(stdout)
+				self.add_msg(stderr)
+				self.warnings = self.warnings + 1
+
+		elif self.release == 6:
+			(code, stdout, stderr) = self.sysexec(["/sbin/chkconfig","puppet","on"])
+
+			if code != 0:
+				self.add_msg("WARNING: Failed to configure Puppet to launch on startupsystem")
+				self.add_msg(stdout)
+				self.add_msg(stderr)
+				self.warnings = self.warnings + 1
 
 		self.view_finish()
 
