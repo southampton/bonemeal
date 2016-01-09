@@ -39,7 +39,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-01-09-07'
+	version       = '2016-01-09-08'
 
 	# [bonemeal]
 	config = {
@@ -656,7 +656,7 @@ nameserver 152.78.111.113
 				self.fatal("Could not install satellite SSL certificate RPM: \n" + stdout + "\n" + stderr)
 				return
 
-		(code, stdout, stderr) = self.sysexec(["/bin/wget","-q","-O","/etc/sysconfig/rhn/up2date","https://rhn.soton.ac.uk/pub/up2date","--no-check-certificate"])
+		(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/sysconfig/rhn/up2date","https://rhn.soton.ac.uk/pub/up2date","--no-check-certificate"])
 
 		if code != 0:
 			self.fatal("Could not download up2date config file: \n" + stdout + "\n" + stderr)
@@ -675,7 +675,7 @@ nameserver 152.78.111.113
 		## 5. RPM GPG KEYS #####################################################
 
 		## iSolutions GPG Key
-		(code, stdout, stderr) = self.sysexec(["/bin/wget","-q","-O","/etc/pki/rpm-gpg/ISOLUTIONS-PUBLIC-KEY","https://rhn.soton.ac.uk/pub/ISOLUTIONS-PUBLIC-KEY","--no-check-certificate"])
+		(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/pki/rpm-gpg/ISOLUTIONS-PUBLIC-KEY","https://rhn.soton.ac.uk/pub/ISOLUTIONS-PUBLIC-KEY","--no-check-certificate"])
 
 		if code != 0:
 			self.fatal("Could not download the iSolutions RPM GPG key: \n" + stdout + "\n" + stderr)
@@ -693,7 +693,7 @@ nameserver 152.78.111.113
 			epel_key = "https://rhn.soton.ac.uk/pub/RPM-GPG-KEY-EPEL"
 
 		## EPEL GPG Key
-		(code, stdout, stderr) = self.sysexec(["/bin/wget","-q","-O","/etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL",epel_key,"--no-check-certificate"])
+		(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL",epel_key,"--no-check-certificate"])
 
 		if code != 0:
 			self.fatal("Could not download the EPEL RPM GPG key: \n" + stdout + "\n" + stderr)
@@ -706,7 +706,7 @@ nameserver 152.78.111.113
 			return
 
 		## PuppetLabs Yum Repository GPG Key
-		(code, stdout, stderr) = self.sysexec(["/bin/wget","-q","-O","/etc/pki/rpm-gpg/RPM-GPG-KEY-PUPPET-COLLECTIONS","https://rhn.soton.ac.uk/pub/RPM-GPG-KEY-PUPPET-COLLECTIONS","--no-check-certificate"])
+		(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/pki/rpm-gpg/RPM-GPG-KEY-PUPPET-COLLECTIONS","https://rhn.soton.ac.uk/pub/RPM-GPG-KEY-PUPPET-COLLECTIONS","--no-check-certificate"])
 
 		if code != 0:
 			self.fatal("Could not download the Puppet RPM GPG key: \n" + stdout + "\n" + stderr)
