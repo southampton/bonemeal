@@ -678,9 +678,9 @@ nameserver 152.78.111.113
 			self.fatal("Could not import the iSolutions RPM GPG key: \n" + stdout + "\n" + stderr)
 			return
 
-		if self.release = 7:
+		if self.release == 7:
 			epel_key = "https://rhn.soton.ac.uk/pub/RPM-GPG-KEY-EPEL-7"
-		elif self.release = 6:
+		elif self.release == 6:
 			epel_key = "https://rhn.soton.ac.uk/pub/RPM-GPG-KEY-EPEL"
 
 		## EPEL GPG Key
@@ -821,7 +821,7 @@ nameserver 152.78.111.113
 			warn = urwid.Text("One warning was detected during installation. \nPlease review " + self.config['log_file'] + " on reboot to check these warnings.",align='center')
 			pile1 = urwid.Pile([btwp,div,txt,div,warn])
 		else:
-			warn = urwid.Text(str(self.warnings) + u" warnings were encountered during installation.\n Please review " + self.config['log_file'] +  on reboot to check these warnings.",align='center')
+			warn = urwid.Text(str(self.warnings) + u" warnings were encountered during installation.\n Please review " + self.config['log_file'] + " on reboot to check these warnings.",align='center')
 			pile1 = urwid.Pile([btwp,div,txt,div,warn])
 
 		pile1 = urwid.Filler(pile1, 'middle', None, 7)
