@@ -39,7 +39,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-01-18-02'
+	version       = '2016-01-18-04'
 
 	# [bonemeal]
 	config = {
@@ -639,17 +639,13 @@ nameserver 152.78.111.113
 		## 4. RED HAT SATELLITE ################################################
 
 		self.add_msg("Satellite: Installing certificate RPM")
-		## See if the rpm is already installed
-		(code, stdout, stderr) = self.sysexec(["/bin/rpm","-qi","katello-ca-consumer-latest"])
+		(code, stdout, stderr) = self.sysexec(["rpm","-ivh",self.config['satellite_rpm']])
 
-		if code == 0:
-			self.add_msg("NOTICE: katello-ca-consumer-latest was found to be already installed")
-		else:
-			(code, stdout, stderr) = self.sysexec(["rpm","-ivh",self.config['satellite_rpm']])
-
-			if code != 0:
-				self.fatal("Satellite: Could not download SSL certificate RPM: \n" + stdout + "\n" + stderr)
-				return
+		if code != 0:
+			self.add_msg("WARNING: could not install certificate RPM for satellite:")
+			self.add_msg(stdout)
+			self.add_msg(stderr)
+			self.warnings = self.warnings + 1
 
 		self.add_msg("Satellite: Registering with Katello")
 		(code, stdout, stderr) = self.sysexec('/usr/sbin/subscription-manager register --org="University_of_Southampton" --activationkey="' + self.sat_activation_key + '"',shell=True) 
