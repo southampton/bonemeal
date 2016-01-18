@@ -39,7 +39,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-01-09-09'
+	version       = '2016-01-18-01'
 
 	# [bonemeal]
 	config = {
@@ -50,6 +50,7 @@ class Bonemeal:
 		'puppet_master' : 'puppet',
 		'diorite_url'   : 'https://puppet:5000/getcert/user',
 		'diorite_ca'    : '/tmp/puppetca.pem',
+		'satellite_rpm' : 'http://satellite.yourdomain.tld/pub/katello-ca-consumer-latest.noarch.rpm',
 	}
 
 	## colour setup
@@ -416,7 +417,7 @@ class Bonemeal:
 				self.puppet_private_key = self.json['private_key']
 				self.puppet_public_key  = self.json['public_key']
 				self.puppet_cert        = self.json['cert']
-				self.rhn_activation_key = self.json['rhn_activation_key']
+				self.sat_activation_key = self.json['satellite_activation_key']
 			except Exception as ex:
 				self.log.error("failed to parse response from registration server: " + str(ex))
 				self.auth_error.set_text("Failed to understand return response: " + str(ex))
@@ -635,92 +636,36 @@ nameserver 152.78.111.113
 			self.fatal("Could not write to /etc/resolv.conf:\n" + str(ex))
 			return
 
-		## 4. RED HAT NETWORK ##################################################
+		## 4. RED HAT SATELLITE ################################################
 
-		self.add_msg("Preparing to register with RH Satellite")
-		(code, stdout, stderr) = self.sysexec(["wget","-q","-O","/tmp/rhn-org-trusted-ssl-cert-1.0-1.noarch.rpm","https://rhn.soton.ac.uk/pub/rhn-org-trusted-ssl-cert-1.0-1.noarch.rpm","--no-check-certificate"])
+		self.add_msg("Satellite: Installing certificate RPM")
+		(code, stdout, stderr) = self.sysexec(["rpm","-ivh",self.config['satellite_rpm']])
 
 		if code != 0:
-			self.fatal("Could not download satellite SSL certificate RPM: \n" + stdout + "\n" + stderr)
+			self.fatal("Satellite: Could not download SSL certificate RPM: \n" + stdout + "\n" + stderr)
 			return
 
-		## See if the rpm is already installed
-		(code, stdout, stderr) = self.sysexec(["/bin/rpm","-qi","rhn-org-trusted-ssl-cert"])
-
-		if code == 0:
-			self.add_msg("NOTICE: rhn-org-trusted-ssl-cert was found to be already installed")
-		else:
-			(code, stdout, stderr) = self.sysexec(["/bin/rpm","-ivh","/tmp/rhn-org-trusted-ssl-cert-1.0-1.noarch.rpm"])
-
-			if code != 0:
-				self.fatal("Could not install satellite SSL certificate RPM: \n" + stdout + "\n" + stderr)
-				return
-
-		(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/sysconfig/rhn/up2date","https://rhn.soton.ac.uk/pub/up2date","--no-check-certificate"])
+		self.add_msg("Satellite: Registering with Katello")
+		(code, stdout, stderr) = self.sysexec('/usr/sbin/subscription-manager --org="University_of_Southampton" --activationkey="' + self.sat_activation_key + '"',shell=True) 
 
 		if code != 0:
-			self.fatal("Could not download up2date config file: \n" + stdout + "\n" + stderr)
-			return
-
-		self.add_msg("Registering with RH Satellite")
-
-		(code, stdout, stderr) = self.sysexec('/usr/sbin/rhnreg_ks --force --activationkey="' + self.rhn_activation_key + '"',shell=True) 
-
-		if code != 0:
-			self.fatal("Could not register with Red Hat Satellite: \n" + stdout + "\n" + stderr)
+			self.fatal("Satellite: Could not register with Katello: \n" + stdout + "\n" + stderr)
 			return
 		else:
-			self.add_msg("Satellite registration successful")
+			self.add_msg("Satellite: Katello registration successful")
 
-		## 5. RPM GPG KEYS #####################################################
-
-		## iSolutions GPG Key
-		(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/pki/rpm-gpg/ISOLUTIONS-PUBLIC-KEY","https://rhn.soton.ac.uk/pub/ISOLUTIONS-PUBLIC-KEY","--no-check-certificate"])
+		self.add_msg("Satellite: Installing katello-agent")
+		(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install katello-agent",shell=True)
 
 		if code != 0:
-			self.fatal("Could not download the iSolutions RPM GPG key: \n" + stdout + "\n" + stderr)
+			self.fatal("Satellite: Could not install katello-agent: \n" + stdout + "\n" + stderr)
 			return
-
-		(code, stdout, stderr) = self.sysexec(["/bin/rpm","--import","/etc/pki/rpm-gpg/ISOLUTIONS-PUBLIC-KEY"])
-
-		if code != 0:
-			self.fatal("Could not import the iSolutions RPM GPG key: \n" + stdout + "\n" + stderr)
-			return
-
-		if self.release == 7:
-			epel_key = "https://rhn.soton.ac.uk/pub/RPM-GPG-KEY-EPEL-7"
-		elif self.release == 6:
-			epel_key = "https://rhn.soton.ac.uk/pub/RPM-GPG-KEY-EPEL"
-
-		## EPEL GPG Key
-		(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL",epel_key,"--no-check-certificate"])
-
-		if code != 0:
-			self.fatal("Could not download the EPEL RPM GPG key: \n" + stdout + "\n" + stderr)
-			return
-
-		(code, stdout, stderr) = self.sysexec(["/bin/rpm","--import","/etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL"])
-
-		if code != 0:
-			self.fatal("Could not import the EPEL RPM GPG key: \n" + stdout + "\n" + stderr)
-			return
-
-		## PuppetLabs Yum Repository GPG Key
-		(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/pki/rpm-gpg/RPM-GPG-KEY-PUPPET-COLLECTIONS","https://rhn.soton.ac.uk/pub/RPM-GPG-KEY-PUPPET-COLLECTIONS","--no-check-certificate"])
-
-		if code != 0:
-			self.fatal("Could not download the Puppet RPM GPG key: \n" + stdout + "\n" + stderr)
-			return
-
-		(code, stdout, stderr) = self.sysexec(["/bin/rpm","--import","/etc/pki/rpm-gpg/RPM-GPG-KEY-PUPPET-COLLECTIONS"])
-
-		if code != 0:
-			self.fatal("Could not import the Puppet RPM GPG key: \n" + stdout + "\n" + stderr)
-			return
+		else:
+			self.add_msg("Satellite: Installed katello-agent")
 
 		## 6. YUM UPDATE #######################################################
 
-		self.add_msg("Installing software updates")
+		self.add_msg("Update: Installing latest updates")
 		(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y update",shell=True)
 
 		if code != 0:
@@ -733,7 +678,7 @@ nameserver 152.78.111.113
 
 		# a dependency on our use of puppet is lsb based facter variables
 		# so we install it first.
-		self.add_msg("Installing redhat-lsb-core package")
+		self.add_msg("Puppet: Installing redhat-lsb-core package")
 		(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install redhat-lsb-core",shell=True)
 
 		if code != 0:
@@ -741,7 +686,7 @@ nameserver 152.78.111.113
 			return
 
 		## INSTALL PUPPET
-		self.add_msg("Installing Puppet")
+		self.add_msg("Puppet: Installing puppet-agent")
 		(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install puppet-agent",shell=True)
 
 		if code != 0:
@@ -749,7 +694,7 @@ nameserver 152.78.111.113
 			return
 
 		## SET CONFIG - server
-		self.add_msg("Setting Puppet master to " + self.config['puppet_master'])
+		self.add_msg("Puppet: Setting master server to " + self.config['puppet_master'])
 		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " config set server " + self.config['puppet_master'],shell=True)
 
 		if code != 0:
@@ -765,7 +710,7 @@ nameserver 152.78.111.113
 			return
 
 		## Run Puppet fingerprint. This sets up the SSL dir and generates some files but thats it.
-		self.add_msg("Setting up Puppet SSL directory")
+		self.add_msg("Puppet: Setting up the SSL directory")
 		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " agent --fingerprint",shell=True)
 
 		## Deploy certificates and set certname option in puppet.conf
@@ -783,7 +728,7 @@ nameserver 152.78.111.113
 			self.fatal("Could not save puppet certificate files:\n" + str(ex))
 			return
 
-		self.add_msg("Applying puppet policy to the system")
+		self.add_msg("Puppet: Applying policy")
 		## we run twice just to be sure. we only care about the exit code of the second
 		self.sysexec(self.config['puppet_binary'] + " agent --test",shell=True)
 		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " agent --test",shell=True)
@@ -793,7 +738,7 @@ nameserver 152.78.111.113
 			return
 
 		## Set Puppet to run all the time
-		self.add_msg("Setting Puppet to launch on startup")
+		self.add_msg("Puppet: Enabling on startup")
 		if self.release == 7:
 			(code, stdout, stderr) = self.sysexec(["/bin/systemctl","enable","puppet"])
 
@@ -813,6 +758,8 @@ nameserver 152.78.111.113
 				self.warnings = self.warnings + 1
 
 		self.view_finish()
+
+################################################################################
 
 	def netcfg_remove(self,line):
 		removals = ['BOOTPROTO','DHCPCLASS','NM_CONTROLLED','IPADDR','NETMASK','GATEWAY','PEERDNS']
