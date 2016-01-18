@@ -39,7 +39,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-01-18-01'
+	version       = '2016-01-18-02'
 
 	# [bonemeal]
 	config = {
@@ -646,10 +646,10 @@ nameserver 152.78.111.113
 			return
 
 		self.add_msg("Satellite: Registering with Katello")
-		(code, stdout, stderr) = self.sysexec('/usr/sbin/subscription-manager --org="University_of_Southampton" --activationkey="' + self.sat_activation_key + '"',shell=True) 
+		(code, stdout, stderr) = self.sysexec('/usr/sbin/subscription-manager register --org="University_of_Southampton" --activationkey="' + self.sat_activation_key + '"',shell=True) 
 
 		if code != 0:
-			self.fatal("Satellite: Could not register with Katello: \n" + stdout + "\n" + stderr)
+			self.fatal("Satellite: Could not register with katello: \n" + stdout + "\n" + stderr)
 			return
 		else:
 			self.add_msg("Satellite: Katello registration successful")
