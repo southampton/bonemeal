@@ -16,6 +16,8 @@ import time       # for pausing at startup to avoid nasty boot messages
 from netaddr import IPAddress, IPNetwork # for network configuration
 import ConfigParser # for config
 import traceback   # for exception handling
+import sys
+import termios
 
 ## NETWORK CONFIGS
 NETWORKS_LIST = [
@@ -39,7 +41,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-01-20-02'
+	version       = '2016-01-20-03'
 
 	# [bonemeal]
 	config = {
@@ -65,7 +67,6 @@ class Bonemeal:
 	## state handling for unhandled input
 	start   = True
 	finish  = False
-
 
 ################################################################################
 
@@ -135,9 +136,9 @@ class Bonemeal:
 			if not self.supported_os():
 				self.fatal("Your operating system is not supported by this installer. Only RHEL6 and RHEL7 are supported.")
 			else:
-				self.view_sethostname()
 				self.start = False
-		elif self.finish:
+				self.view_sethostname()
+		elif self.finish and key == 'space':
 			self.clean_finish()
 		elif key == 'Q':
 			raise urwid.ExitMainLoop()
@@ -207,6 +208,7 @@ class Bonemeal:
 ## SET HOSTNAME
 
 	def view_sethostname(self):
+
 		div = urwid.Divider()
 
 		htxt = urwid.Text(u"Welcome to the installation wizard. Please enter the hostname of the server. Use the arrow keys to move between fields.",align='left')
@@ -776,6 +778,8 @@ nameserver 152.78.111.113
 ## FINISH SCREEN
 
 	def view_finish(self):
+		## clear standard input so if the user pressed buttons during the install script, clear them away
+		termios.tcflush(sys.stdin,termios.TCIOFLUSH)
 
 		div = urwid.Divider()
 		bt = urwid.BigText('all done!', font=urwid.font.HalfBlock5x4Font())
@@ -814,6 +818,9 @@ nameserver 152.78.111.113
 ## FATAL ERROR SCREEN
 
 	def view_fatal_error(self,message):
+		## clear standard input so if the user pressed buttons during the install script, clear them away
+		termios.tcflush(sys.stdin,termios.TCIOFLUSH)
+
 		div = urwid.Divider()
 
 		bt = urwid.BigText('uh oh...', font=urwid.font.HalfBlock5x4Font())
