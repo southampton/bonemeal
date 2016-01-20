@@ -39,7 +39,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-01-20-01'
+	version       = '2016-01-20-02'
 
 	# [bonemeal]
 	config = {
@@ -494,10 +494,10 @@ class Bonemeal:
 			for i, line in enumerate(netcfg):
 				if line.startswith('HOSTNAME'):
 					found_hostname = True
-					netcfg[i] = "HOSTNAME=" + self.hostname
+					netcfg[i] = "HOSTNAME=" + self.hostname + "\n"
 
 			if not found_hostname:
-				netcfg.append("HOSTNAME=" + self.hostname)
+				netcfg.append("HOSTNAME=" + self.hostname + "\n")
 
 			self.add_msg("Saving new system network configuration with updated hostname")
 			try:
