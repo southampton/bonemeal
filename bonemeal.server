@@ -41,7 +41,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-01-20-05'
+	version       = '2016-01-20-06'
 
 	# [bonemeal]
 	config = {
@@ -701,7 +701,7 @@ nameserver 152.78.111.113
 			return
 
 		## SET CONFIG - certname
-		self.add_msg("Setting Puppet certname to " + self.fqdn)
+		self.add_msg("Puppet: Setting certname to " + self.fqdn)
 		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " config set certname	 " + self.fqdn,shell=True)
 
 		if code != 0:
@@ -713,7 +713,7 @@ nameserver 152.78.111.113
 		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " agent --fingerprint",shell=True)
 
 		## Deploy certificates and set certname option in puppet.conf
-		self.add_msg("Saving puppet certificates")
+		self.add_msg("Puppet: Saving client certificate")
 		try:
 			with open(self.config['puppet_ssldir'] + "certs/" + self.fqdn + ".pem", "w") as fp:
 				fp.write(self.puppet_cert)
