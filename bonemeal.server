@@ -41,7 +41,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-01-20-06'
+	version       = '2016-01-20-07'
 
 	# [bonemeal]
 	config = {
@@ -138,7 +138,7 @@ class Bonemeal:
 			else:
 				self.start = False
 				self.view_sethostname()
-		elif self.finish and key == 'space':
+		elif self.finish:
 			self.clean_finish()
 		elif key == 'Q':
 			raise urwid.ExitMainLoop()
