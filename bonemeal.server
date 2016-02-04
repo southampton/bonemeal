@@ -41,7 +41,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-01-20-07'
+	version       = '2016-02-04-02'
 
 	# [bonemeal]
 	config = {
@@ -65,8 +65,9 @@ class Bonemeal:
 		]
 
 	## state handling for unhandled input
-	start   = True
-	finish  = False
+	start           = True
+	finish          = False
+	finish_template = False
 
 ################################################################################
 
@@ -115,19 +116,27 @@ class Bonemeal:
 		## Run the loop		
 		self.loop.run()
 
+################################################################################
+
 	def fatal(self,message):
 		self.log.critical("fatal error: " + message)
 		self.view_fatal_error(message)
 
+################################################################################
+
 	def switch_view(self,view):
 		self.loop.widget = view
 		self.loop.draw_screen()
+
+################################################################################
 
 	def setup_header_footer(self):
 		self.header_text = urwid.Text(" " + self.config['title'])
 		self.header = urwid.AttrWrap(self.header_text, 'header')
 		self.footer_text = urwid.Text("bonemeal installer " + self.version)
 		self.footer = urwid.AttrWrap(self.footer_text, 'header')
+
+################################################################################
 
 	def unhandled_input(self,key):
 		if self.start:
@@ -136,12 +145,21 @@ class Bonemeal:
 			if not self.supported_os():
 				self.fatal("Your operating system is not supported by this installer. Only RHEL6 and RHEL7 are supported.")
 			else:
-				self.start = False
-				self.view_sethostname()
+				if key == 'Q':
+					self.handle_exit()
+				elif key == 'T':
+					self.view_mktemplate()
+				else:
+					self.start = False
+					self.view_sethostname()
 		elif self.finish:
 			self.clean_finish()
+		elif self.finish_template:
+			self.poweroff()
 		elif key == 'Q':
-			raise urwid.ExitMainLoop()
+			self.handle_exit()
+
+################################################################################
 
 	def sysexec(self,command,shell=False):
 		self.log.info("executing command: " + str(command))
@@ -154,6 +172,8 @@ class Bonemeal:
 			self.log.error("command generated an exception: " + str(ex))
 			return (1,"",str(ex))
 
+################################################################################
+
 	def handle_exit(self,button):
 		raise urwid.ExitMainLoop()
 
@@ -164,6 +184,8 @@ class Bonemeal:
 		name = platform.node()
 		self.log.info("detected hostname as " + name)
 		return name
+
+################################################################################
 
 	def get_network_interfaces(self):
 		try:
@@ -178,6 +200,8 @@ class Bonemeal:
 			pass
 
 		return entries
+
+################################################################################
 
 	def get_ip_from_hostname(self):
 		try:
@@ -197,8 +221,10 @@ class Bonemeal:
 		bt = urwid.BigText('I am ready to build', font=urwid.font.HalfBlock5x4Font())
 		btwp = urwid.Padding(bt, "center", 'clip')
 
-		txt = urwid.Text(u"Press any key to get started",align='center')
-		pile1 = urwid.Pile([btwp,div,txt])
+		txt = urwid.Text(u"Press any key to set up the system\n",align='center')
+		txt2 = urwid.Text(u"Press Shift+T to set this system up as a template",align='center')
+		txt3 = urwid.Text(u"Press Shift+Q to exit the installer",align='center')
+		pile1 = urwid.Pile([btwp,div,txt,txt2,txt3])
 		pile1 = urwid.Filler(pile1, 'middle', None, 7)
 
 		frame = urwid.Frame(header=self.header, body=pile1, footer=self.footer)
@@ -436,7 +462,55 @@ class Bonemeal:
 			return
 
 ################################################################################
-## DO INSTALL "GO"
+## do the template
+
+	def view_mktemplate(self):
+		div = urwid.Divider()
+
+		self.msgs = urwid.SimpleFocusListWalker([urwid.Text(" ",align='left'),urwid.Text(" Starting templatisation",align='left')])
+		self.msgs_box = urwid.ListBox(self.msgs)
+
+		frame = urwid.Frame(header=self.header, body=tbox, footer=self.footer)
+		self.switch_view(urwid.AttrMap(frame, 'bg'))
+
+		self.add_msg("Removing SSH host keys")
+		self.sysexec("", shell=True)
+
+		self.add_msg("Removing persistent network rules")
+		self.sysexec("/bin/rm -f /etc/udev/rules.d/70-persistent-net.rules", shell=True)
+
+		self.add_msg("Removing network configuration")
+		self.sysexec("/bin/sed -i '/^[ \t]*(HWADDR|UUID)/d' /etc/sysconfig/network-scripts/ifcfg-eth*", shell=True)
+
+		self.add_msg("Cleaning up yum data")
+		self.sysexec("/usr/bin/yum clean all", shell=True)
+
+		self.add_msg("Unregistering with subscription manager")
+		self.sysexec("/usr/bin/subscription-manager unregister", shell=True)
+
+		self.add_msg("Cleaning up subscription manager data")
+		self.sysexec("/usr/bin/subscription-manager clean", shell=True)
+
+		# Some of these are wrapped in if blocks to prevent accidentally
+		# creating files with potentially the wrong permissions
+		self.add_msg("Erasing log files and login history")
+		self.sysexec("/bin/cat /dev/null > /var/log/audit/audit.log", shell=True)
+		self.sysexec("/bin/cat /dev/null > /var/log/messages", shell=True)
+		self.sysexec("/bin/cat /dev/null > /var/log/wtmp", shell=True)
+		self.sysexec("/bin/rm -f /var/log/audit/audit.log.*", shell=True)
+		self.sysexec("/bin/rm -f /var/log/messages-*", shell=True)
+		self.sysexec("/bin/rm -f /var/log/maillog-*", shell=True)
+		self.sysexec("/bin/rm -f /var/log/cron-*", shell=True)
+		self.sysexec("/bin/rm -f /var/log/spooler-*", shell=True)
+		self.sysexec("/bin/rm -f /var/log/secure-*", shell=True)
+		self.sysexec("/bin/rm -f /var/log/yum-*", shell=True)
+		self.sysexec("/bin/rm -f /var/log/up2date-*", shell=True)
+
+        self.add_msg("Removing temporary files")
+        self.sysexec("/bin/rm -rf /tmp/* /var/tmp/*", shell=True)
+
+################################################################################
+## do the install
 
 	def view_go(self):
 		div = urwid.Divider()
@@ -797,6 +871,28 @@ nameserver 152.78.111.113
 		self.switch_view(urwid.AttrMap(frame, 'bg'))
 		self.finish = True
 
+################################################################################
+## FINISH TEMPLATE SCREEN
+
+	def view_finish_mktemplate(self):
+		## clear standard input so if the user pressed buttons during the install script, clear them away
+		termios.tcflush(sys.stdin,termios.TCIOFLUSH)
+
+		div = urwid.Divider()
+		bt = urwid.BigText('all done!', font=urwid.font.HalfBlock5x4Font())
+		btwp = urwid.Padding(bt, "center", 'clip')
+
+		txt = urwid.Text(u"Press any key to power off the system\nYou can then convert this VM to a template in vCenter",align='center')
+
+		pile1 = urwid.Pile([btwp,div,txt])
+		pile1 = urwid.Filler(pile1, 'middle', None, 7)
+
+		frame = urwid.Frame(header=self.header, body=pile1, footer=self.footer)
+		self.switch_view(urwid.AttrMap(frame, 'bg'))
+		self.finish_template = True
+
+################################################################################
+
 	def clean_finish(self):
 		if self.release == 7:
 			self.sysexec("/bin/rm -f /etc/systemd/system/multi-user.target.wants/bonemeal.service",shell=True)
@@ -807,6 +903,12 @@ nameserver 152.78.111.113
 		self.sysexec("/sbin/reboot")
 
 		## exit
+		raise urwid.ExitMainLoop()
+
+################################################################################
+
+	def poweroff(self):
+		self.sysexec("/sbin/poweroff")
 		raise urwid.ExitMainLoop()
 
 ################################################################################
