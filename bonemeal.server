@@ -41,7 +41,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-02-04-03'
+	version       = '2016-02-04-04'
 
 	# [bonemeal]
 	config = {
@@ -470,7 +470,7 @@ class Bonemeal:
 		self.msgs = urwid.SimpleFocusListWalker([urwid.Text(" ",align='left'),urwid.Text(" Starting templatisation",align='left')])
 		self.msgs_box = urwid.ListBox(self.msgs)
 
-		frame = urwid.Frame(header=self.header, body=tbox, footer=self.footer)
+		frame = urwid.Frame(header=self.header, body=self.msgs_box, footer=self.footer)
 		self.switch_view(urwid.AttrMap(frame, 'bg'))
 
 		self.add_msg("Removing SSH host keys")
