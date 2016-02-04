@@ -41,7 +41,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-02-04-02'
+	version       = '2016-02-04-03'
 
 	# [bonemeal]
 	config = {
@@ -506,8 +506,8 @@ class Bonemeal:
 		self.sysexec("/bin/rm -f /var/log/yum-*", shell=True)
 		self.sysexec("/bin/rm -f /var/log/up2date-*", shell=True)
 
-        self.add_msg("Removing temporary files")
-        self.sysexec("/bin/rm -rf /tmp/* /var/tmp/*", shell=True)
+		self.add_msg("Removing temporary files")
+		self.sysexec("/bin/rm -rf /tmp/* /var/tmp/*", shell=True)
 
 ################################################################################
 ## do the install
