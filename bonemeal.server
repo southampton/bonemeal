@@ -41,7 +41,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-02-04-05'
+	version       = '2016-02-04-06'
 
 	# [bonemeal]
 	config = {
@@ -508,6 +508,8 @@ class Bonemeal:
 
 		self.add_msg("Removing temporary files")
 		self.sysexec("/bin/rm -rf /tmp/* /var/tmp/*", shell=True)
+
+		self.view_finish_mktemplate()		
 
 ################################################################################
 ## do the install
