@@ -41,7 +41,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-02-04-06'
+	version       = '2016-02-04-07'
 
 	# [bonemeal]
 	config = {
@@ -148,6 +148,7 @@ class Bonemeal:
 				if key == 'Q':
 					self.handle_exit()
 				elif key == 'T':
+					self.start = False
 					self.view_mktemplate()
 				else:
 					self.start = False
