@@ -1,0 +1,76 @@
+#!/bin/bash
+
+# Ensure that we are running as root
+if [[ "x$(id -u)" != "x0" ]]; then
+	echo "This script must be run as root"
+	exit 1;
+fi
+
+# Prompt user
+echo "This will prepare the system as a template and power it off"
+read -p "Are you sure you want to do this? " -r
+if [[ $REPLY =~ ^[Yy]([Ee][Ss])?$ ]]; then
+	echo "Preparing system for templatisation..."
+
+	echo " - Removing SSH host keys"
+	/bin/rm -f /etc/ssh/ssh_host_*
+
+	echo " - Removing persistent network rules"
+	/bin/rm -f /etc/udev/rules.d/70-persistent-net.rules
+
+	echo " - Removing HWADDR and UUID settings from network config files"
+	/bin/sed -i '/^[ \t]*(HWADDR|UUID)/d' /etc/sysconfig/network-scripts/ifcfg-eth*
+
+	echo " - Cleaning up yum data"
+	/usr/bin/yum clean all
+
+	echo " - Unregistering with subscription manager"
+	/usr/bin/subscription-manager unregister
+
+	echo " - Cleaning up subscription manager data"
+	/usr/bin/subscription-manager clean
+
+	echo " - Removing Puppet SSL certificates"
+	/bin/rm -rf /etc/puppetlabs/puppet/ssl/
+
+	# Some of these are wrapped in if blocks to prevent accidentally
+	# creating files with potentially the wrong permissions
+	echo " - Erasing log files and login history"
+	if [ -f /var/log/audit/audit.log ]; then
+		/bin/cat /dev/null > /var/log/audit/audit.log
+	fi
+	if [ -f /var/log/messages ]; then
+		/bin/cat /dev/null > /var/log/messages
+	fi
+	if [ if /var/log/wtmp ]; then
+		/bin/cat /dev/null > /var/log/wtmp
+	fi
+	/bin/rm -f /var/log/audit/audit.log.*
+	/bin/rm -f /var/log/messages-*
+	/bin/rm -f /var/log/maillog-*
+	/bin/rm -f /var/log/cron-*
+	/bin/rm -f /var/log/spooler-*
+	/bin/rm -f /var/log/secure-*
+	/bin/rm -f /var/log/yum-*
+	/bin/rm -f /var/log/up2date-*
+
+	echo " - Remove bash history for root"
+	/bin/rm /root/.bash_history
+
+	echo " - Removing temporary files"
+	/bin/rm -rf /tmp/*
+	/bin/rm -rf /var/tmp/*
+
+	echo " - Creating blank /etc/hosts"
+	echo "127.0.0.1		localhost localhost.localdomain localhost4 localhost4.localdomain4" > /etc/hosts
+	echo "::1		localhost localhost.localdomain localhost6 localhost6.localdomain6" >> /etc/hosts
+
+	echo " - Creating template marker file"
+	/bin/touch /.bonemeal_template
+
+	echo
+	echo "Preparation complete. System will power off in five seconds."
+	echo "Press Ctrl+C to abort"
+
+	/bin/sleep 5 && /sbin/poweroff
+fi
