@@ -41,7 +41,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-02-05-03'
+	version       = '2016-02-05-05'
 
 	# [bonemeal]
 	config = {
@@ -439,7 +439,7 @@ class Bonemeal:
 	def view_go(self):
 		div = urwid.Divider()
 
-		self.msgs = urwid.SimpleFocusListWalker([urwid.Text(" ",align='left'),urwid.Text("Init: Starting post-install",align='left')])
+		self.msgs = urwid.SimpleFocusListWalker([urwid.Text(" ",align='left'),urwid.Text(" Init: Starting post-install",align='left')])
 		self.msgs_box = urwid.ListBox(self.msgs)
 
 		frame = urwid.Frame(header=self.header, body=self.msgs_box, footer=self.footer)
@@ -461,9 +461,10 @@ class Bonemeal:
 
 		if os.path.exists('/.bonemeal_template'):
 			self.fromTemplate = True
-			self.add_msg("Init: Detected installation from tprep'd template")
+			self.add_msg(" Init: Detected installation from tprep'd template")
 		else:
 			self.fromTemplate = False
+			self.add_msg(" Init: Detected clean installation (not from template)")
 
 		## 1. HOSTNAME #########################################################
 
@@ -833,15 +834,13 @@ nameserver 152.78.111.113
 		self.finish = True
 
 	def clean_finish(self):
-		if self.release == 7:
-			self.sysexec("/bin/rm -f /etc/systemd/system/multi-user.target.wants/bonemeal.service",shell=True)
-		elif self.release == 6:
-			self.sysexec("/sbin/chkconfig setup off",shell=True)
+		## Mark bonemeal as not starting at reboot
+		os.unlink('/.bonemeal')
 
 		## reboot
 		self.sysexec("/sbin/reboot")
 
-		## exit
+		## exit (We probably never get this far)
 		raise urwid.ExitMainLoop()
 
 ################################################################################
