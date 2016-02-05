@@ -41,7 +41,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-02-05-02'
+	version       = '2016-02-05-03'
 
 	# [bonemeal]
 	config = {
@@ -462,6 +462,7 @@ class Bonemeal:
 		if os.path.exists('/.bonemeal_template'):
 			self.fromTemplate = True
 			self.add_msg("Init: Detected installation from tprep'd template")
+		else:
 			self.fromTemplate = False
 
 		## 1. HOSTNAME #########################################################
