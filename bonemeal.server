@@ -41,7 +41,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-02-5-01'
+	version       = '2016-02-05-01'
 
 	# [bonemeal]
 	config = {
