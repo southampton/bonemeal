@@ -61,11 +61,12 @@ if [[ $REPLY =~ ^[Yy]([Ee][Ss])?$ ]]; then
 	/bin/rm -rf /tmp/*
 	/bin/rm -rf /var/tmp/*
 
-	echo " - Creating blank /etc/hosts"
+	echo " - Creating default /etc/hosts"
 	echo "127.0.0.1		localhost localhost.localdomain localhost4 localhost4.localdomain4" > /etc/hosts
 	echo "::1		localhost localhost.localdomain localhost6 localhost6.localdomain6" >> /etc/hosts
 
-	echo " - Creating template marker file"
+	echo " - Creating bonemeal marker files"
+	/bin/touch /.bonemeal
 	/bin/touch /.bonemeal_template
 
 	echo
