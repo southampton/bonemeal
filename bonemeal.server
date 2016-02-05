@@ -41,7 +41,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-02-05-01'
+	version       = '2016-02-05-02'
 
 	# [bonemeal]
 	config = {
@@ -541,7 +541,7 @@ class Bonemeal:
 		## 3. NETWORK ##########################################################
 
 		## turn off network manager
-		if not this.fromTemplate:
+		if not self.fromTemplate:
 			if self.release == 7:
 				self.add_msg("Network: Stopping NetworkManager")
 				(code, stdout, stderr) = self.sysexec(["/bin/systemctl","stop","NetworkManager"])
@@ -643,7 +643,7 @@ nameserver 152.78.111.113
 
 		## 4. RED HAT SATELLITE ################################################
 
-		if not this.fromTemplate:
+		if not self.fromTemplate:
 			self.add_msg("Satellite: Installing certificate RPM")
 			(code, stdout, stderr) = self.sysexec(["rpm","-ivh",self.config['satellite_rpm']])
 
@@ -662,7 +662,7 @@ nameserver 152.78.111.113
 		else:
 			self.add_msg("Satellite: Katello registration successful")
 
-		if not this.fromTemplate:
+		if not self.fromTemplate:
 			self.add_msg("Satellite: Installing katello-agent")
 			(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install katello-agent",shell=True)
 
@@ -689,7 +689,7 @@ nameserver 152.78.111.113
 		## messing with it. Puppet won't be working anyway at the moment because tprep
 		## will have wiped its certificates.
 
-		if this.fromTemplate:
+		if self.fromTemplate:
 			if self.release == 7:
 				self.add_msg("Network: Stopping NetworkManager")
 				(code, stdout, stderr) = self.sysexec(["/bin/systemctl","stop","puppet"])
@@ -709,7 +709,7 @@ nameserver 152.78.111.113
 
 		# a dependency on our use of puppet is lsb based facter variables
 		# so we install it first.
-		if not this.fromTemplate:
+		if not self.fromTemplate:
 			self.add_msg("Puppet: Installing redhat-lsb-core package")
 			(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install redhat-lsb-core",shell=True)
 
@@ -718,7 +718,7 @@ nameserver 152.78.111.113
 				return
 
 		## INSTALL PUPPET
-		if not this.fromTemplate:
+		if not self.fromTemplate:
 			self.add_msg("Puppet: Installing puppet-agent")
 			(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install puppet-agent",shell=True)
 
