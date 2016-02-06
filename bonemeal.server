@@ -42,7 +42,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-02-06-02'
+	version       = '2016-02-06-03'
 
 	# [bonemeal]
 	config = {
@@ -118,7 +118,7 @@ class Bonemeal:
 			self.log.info("found template marker file; template mode activated")
 			
 			## Check if vmware guest customisation has taken place, if not, show an error (reboot /should/ happen after!)
-			if os.path.exists('/tmp/.vmware-deploy.Done'):
+			if os.path.isfile('/tmp/.vmware-deploy.Done'):
 				view_function = self.view_automated()
 			else:
 				view_function = self.view_automated_wait()
@@ -162,20 +162,21 @@ class Bonemeal:
 ################################################################################
 
 	def unhandled_input(self,key):
-		if self.start:
+		if not self.fromTemplate:
+			if self.start:
 	
-			## Check the OS is supported
-			if not self.supported_os():
-				self.fatal("Your operating system is not supported by this installer. Only RHEL6 and RHEL7 are supported.")
-			else:
-				self.start = False
-				self.view_sethostname()
+				## Check the OS is supported
+				if not self.supported_os():
+					self.fatal("Your operating system is not supported by this installer. Only RHEL6 and RHEL7 are supported.")
+				else:
+					self.start = False
+					self.view_sethostname()
 
-		elif self.finish:
-			self.finished()
+			elif self.finish:
+				self.finished()
 
-		elif key == 'Q':
-			self.handle_exit()
+			elif key == 'Q':
+				self.handle_exit()
 
 ################################################################################
 
@@ -428,7 +429,7 @@ class Bonemeal:
 		self.log.info("dhcp networking chosen")
 		self.dhcp = True
 		self.footer_text.set_text(self.fqdn + " / " + self.netif + " / dhcp")
-		self.view_auth()	
+		self.view_auth()
 
 ################################################################################
 ## AUTHENTICATE / REGISTER
@@ -527,6 +528,7 @@ class Bonemeal:
 			## normally this is done when the user first presses a key
 			if not self.supported_os():
 				self.fatal("Your operating system is not supported by this installer. Only RHEL6 and RHEL7 are supported.")
+				return
 
 			## We need to authenticate with hostname and VM UUID to get 
 			## puppet certs and rhn activation keys
@@ -555,6 +557,7 @@ class Bonemeal:
 
 			if r.status_code == 200:
 				try:
+					self.log.error("diorite server returned 200 OK response")
 					self.json = r.json()
 					self.puppet_private_key = self.json['private_key']
 					self.puppet_public_key  = self.json['public_key']
