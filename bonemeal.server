@@ -18,6 +18,7 @@ import ConfigParser # for config
 import traceback   # for exception handling
 import sys
 import termios
+import dmidecode
 
 ## NETWORK CONFIGS
 NETWORKS_LIST = [
@@ -41,7 +42,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-02-05-06'
+	version       = '2016-02-06-01'
 
 	# [bonemeal]
 	config = {
@@ -50,7 +51,7 @@ class Bonemeal:
 		'puppet_ssldir' : '/etc/puppetlabs/puppet/ssl/',
 		'puppet_binary' : '/opt/puppetlabs/bin/puppet',
 		'puppet_master' : 'puppet',
-		'diorite_url'   : 'https://puppet:5000/getcert/user',
+		'diorite_url'   : 'https://puppet:5000/register',
 		'diorite_ca'    : '/etc/pki/tls/diorite.pem',
 		'satellite_rpm' : 'http://satellite.yourdomain.tld/pub/katello-ca-consumer-latest.noarch.rpm',
 	}
@@ -70,7 +71,7 @@ class Bonemeal:
 
 ################################################################################
 
-	def main(self):
+	def __init__(self):
 		print "[bonemeal] Please wait whilst starting the installer..."
 
 		# load configuration from file
@@ -78,15 +79,19 @@ class Bonemeal:
 
 		try:
 			configParser.readfp(open(CONFIG_FILE))
+
+			# try to load config options if they exist - overwriting defaults
+			for key in self.config.keys():
+				if configParser.has_option('bonemeal',key):
+					self.config[key] = configParser.get('bonemeal',key)
+
 		except Exception as ex:
 			print "[bonemeal] Could not read from config file " + CONFIG_FILE + ": " + str(ex)
-			print "[bonemeal] Starting with default options. Press Ctrl+C to cancel."
-			time.sleep(5)
+			print "[bonemeal] Starting with default options"
 
-		# try to load config options if they exist - overwriting defaults
-		for key in self.config.keys():
-			if configParser.has_option('bonemeal',key):
-				self.config[key] = configParser.get('bonemeal',key)
+		## ensure the diorite URL ends with a slash
+		if not self.config['diorite_url'].endswith('/'):
+			self.config['diorite_url'] = self.config['diorite_url'] + '/'
 
 		# logging
 		self.log    = logging.getLogger("bonemeal")
@@ -99,35 +104,62 @@ class Bonemeal:
 		urwid.command_map['tab'] = 'cursor down'
 
 		## log the startup
-		self.log.info("bonemeal installer version " + self.version + " starting up")
+		self.log.info("bonemeal installer (version " + self.version + ") starting")
 
-		# Sleep for 5 seconds, then reset the screen, so as to wait for 
-		# annoying boot kernel messages and then clear them away
-		time.sleep(5)
+		# clean the screen before running
 		subprocess.call(["reset"])
 
 		## Set a nice header/footer on all pages
 		self.setup_header_footer()
 
-		## Load the main loop
-		self.loop = urwid.MainLoop(self.view_default(), self.palette, unhandled_input=self.unhandled_input)
+		## Detect if we're doing a 'from template' install
+		if os.path.exists('/.bonemeal_template'):
+			self.fromTemplate = True
+			self.log.info("found template marker file; template mode activated")
+			
+			## Check if vmware guest customisation has taken place, if not, show an error (reboot /should/ happen after!)
+			if os.path.exists('/tmp/.vmware-deploy.Done'):
+				view_function = self.view_automated()
+			else:
+				view_function = self.view_automated_wait()
 
-		## Run the loop		
+		else:
+			self.fromTemplate = False
+			view_function = self.view_interactive()
+
+
+		## Create the main loop
+		self.loop = urwid.MainLoop(view_function, self.palette, unhandled_input=self.unhandled_input, handle_mouse=False)
+
+		## if we're in template mode schedule the automated process to start without
+		## requiring somebody to press a key
+		if self.fromTemplate:
+			self.loop.set_alarm_in(0,self.configure)
+
+		## Run the event loop
 		self.loop.run()
+
+################################################################################
 
 	def fatal(self,message):
 		self.log.critical("fatal error: " + message)
 		self.view_fatal_error(message)
 
+################################################################################
+
 	def switch_view(self,view):
 		self.loop.widget = view
 		self.loop.draw_screen()
 
+################################################################################
+
 	def setup_header_footer(self):
 		self.header_text = urwid.Text(" " + self.config['title'])
-		self.header = urwid.AttrWrap(self.header_text, 'header')
+		self.header      = urwid.AttrWrap(self.header_text, 'header')
 		self.footer_text = urwid.Text("bonemeal installer " + self.version)
-		self.footer = urwid.AttrWrap(self.footer_text, 'header')
+		self.footer      = urwid.AttrWrap(self.footer_text, 'header')
+
+################################################################################
 
 	def unhandled_input(self,key):
 		if self.start:
@@ -138,10 +170,14 @@ class Bonemeal:
 			else:
 				self.start = False
 				self.view_sethostname()
+
 		elif self.finish:
-			self.clean_finish()
+			self.finished()
+
 		elif key == 'Q':
-			raise urwid.ExitMainLoop()
+			self.handle_exit()
+
+################################################################################
 
 	def sysexec(self,command,shell=False):
 		self.log.info("executing command: " + str(command))
@@ -154,7 +190,9 @@ class Bonemeal:
 			self.log.error("command generated an exception: " + str(ex))
 			return (1,"",str(ex))
 
-	def handle_exit(self,button):
+################################################################################
+
+	def handle_exit(self,button=None):
 		raise urwid.ExitMainLoop()
 
 ################################################################################
@@ -185,19 +223,42 @@ class Bonemeal:
 			return ""
 
 ################################################################################
-## DEFAULT VIEW
+## INTERACTIVE MODE
 
-	def view_default(self):
-
-		div = urwid.Divider()
-		bt = urwid.BigText('I am ready to build', font=urwid.font.HalfBlock5x4Font())
-		btwp = urwid.Padding(bt, "center", 'clip')
-
-		txt = urwid.Text(u"Press any key to get started",align='center')
+	def view_interactive(self):
+		div   = urwid.Divider()
+		bt    = urwid.BigText('I am ready to build', font=urwid.font.HalfBlock5x4Font())
+		btwp  = urwid.Padding(bt, "center", 'clip')
+		txt   = urwid.Text(u"Press any key to get started",align='center')
 		pile1 = urwid.Pile([btwp,div,txt])
 		pile1 = urwid.Filler(pile1, 'middle', None, 7)
-
 		frame = urwid.Frame(header=self.header, body=pile1, footer=self.footer)
+
+		return urwid.AttrMap(frame, 'bg')
+
+################################################################################
+## AUTOMATED MODE - waiting for vmware guest customisations
+
+	def view_automated_wait(self):
+		div   = urwid.Divider()
+		bt    = urwid.BigText('automated install', font=urwid.font.HalfBlock5x4Font())
+		btwp  = urwid.Padding(bt, "center", 'clip')
+		txt   = urwid.Text(u"waiting for vmware guest customisation",align='center')
+		pile1 = urwid.Pile([btwp,div,txt])
+		pile1 = urwid.Filler(pile1, 'middle', None, 7)
+		frame = urwid.Frame(header=self.header, body=pile1, footer=self.footer)
+
+		return urwid.AttrMap(frame, 'bg')
+
+################################################################################
+## AUTOMATED MODE
+
+	def view_automated(self):
+		div           = urwid.Divider()
+		self.msgs     = urwid.SimpleFocusListWalker([urwid.Text(" ",align='left'),urwid.Text(" Init: Starting automated post-install",align='left')])
+		self.msgs_box = urwid.ListBox(self.msgs)
+		frame         = urwid.Frame(header=self.header, body=self.msgs_box, footer=self.footer)
+
 		return urwid.AttrMap(frame, 'bg')
 
 ################################################################################
@@ -224,6 +285,8 @@ class Bonemeal:
 		fill = urwid.Filler(pile, 'top')
 		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
 		self.switch_view(urwid.AttrMap(frame, 'bg'))
+
+################################################################################
 
 	def handle_hostname(self,button):
 		self.hostname = self.hostname_edit.get_edit_text().lower()
@@ -325,6 +388,8 @@ class Bonemeal:
 		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
 		self.switch_view(urwid.AttrMap(frame, 'bg'))
 
+################################################################################
+
 	def handle_ipaddr(self,button):
 		self.ipaddr = self.ipaddr_edit.get_edit_text()
 		self.dhcp = False
@@ -356,6 +421,8 @@ class Bonemeal:
 
 		self.footer_text.set_text(self.fqdn + " / " + self.netif + " / " + self.ipaddr)
 		self.view_auth()	
+
+################################################################################
 
 	def handle_dhcp(self,button):
 		self.log.info("dhcp networking chosen")
@@ -391,25 +458,19 @@ class Bonemeal:
 		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
 		self.switch_view(urwid.AttrMap(frame, 'bg'))
 
+################################################################################
+
 	def handle_auth(self,button):
 		self.auth_error.set_text("Contacting server, please wait...")
 
-		## What ident to send for what version?
-		if self.release == 7:
-			ident = 'el7s'
-		elif self.release == 6:
-			ident = 'el6s'
-		else:
-			ident = 'unknown'
-
 		## python requests call with SSL...
 		try:
-			payload = {'ident': ident, 'hostname': self.fqdn, 'username': self.username.get_edit_text(), 'password': self.password.get_edit_text()}
-			r = requests.post(self.config['diorite_url'], data=payload, verify = self.config['diorite_ca'])
+			payload = {'ident': self.ident, 'hostname': self.fqdn, 'username': self.username.get_edit_text(), 'password': self.password.get_edit_text()}
+			r = requests.post(self.config['diorite_url'] + 'user', data=payload, verify = self.config['diorite_ca'])
 		except Exception as ex:
 			self.log.error("error contacting registration server: " + str(ex))
 			self.auth_error.set_text("Error contacting registration server: " + str(ex))
-			return				
+			return
 
 		if r.status_code == 200:
 			try:
@@ -448,203 +509,257 @@ class Bonemeal:
 		## now do the install
 		self.configure()
 
+################################################################################
+
 	def add_msg(self,message):
 		self.log.info(message)
 		self.msgs.append(urwid.Text(" " + message.rstrip(),align='left'))
 		self.msgs_box.set_focus(len(self.msgs) -1)
 		self.loop.draw_screen()
 
-	def configure(self):
+################################################################################
+
+	def configure(self, loop=None, user_data=None):
 		self.warnings = 0
 
-		## 0. DETECT IF WE ARE BUILDING FROM A TEMPLATE ########################
+		if self.fromTemplate:
+			## We haven't checked if we're running on a supported OS yet
+			## normally this is done when the user first presses a key
+			if not self.supported_os():
+				self.fatal("Your operating system is not supported by this installer. Only RHEL6 and RHEL7 are supported.")
 
-		if os.path.exists('/.bonemeal_template'):
-			self.fromTemplate = True
-			self.add_msg("Init: Detected installation from tprep'd template")
-		else:
-			self.fromTemplate = False
-			self.add_msg("Init: Detected clean installation (not from template)")
+			## We need to authenticate with hostname and VM UUID to get 
+			## puppet certs and rhn activation keys
 
-		## 1. HOSTNAME #########################################################
-
-		## RHEL7 hostname
-		if self.release == 7:
-			(code, stdout, stderr) = self.sysexec(["/bin/hostnamectl","set-hostname",self.hostname])
-
-			if code != 0:
-				self.fatal("Network: Setting hostname failed: \n" + stdout + "\n" + stderr)
+			## Get the system UUID which is the VMWare UUID which acts as the 'password'
+			try:
+				self.vmuuid = dmidecode.system().values()[1]['data']['UUID']
+			except Exception as ex:
+				self.fatal("Could not read system UUID\n + str(ex)")
 				return
-			else:
-				self.add_msg("Network: Hostname set to '" + self.hostname + "'")
 
-		## RHEL6 hostname
-		elif self.release == 6:
-			network_config_file = "/etc/sysconfig/network"
-			self.add_msg("Network: Reading global configuration (" + network_config_file + ")")
+			## Read the hostname and FQDN
+			self.hostname = socket.gethostname()
+			self.fqdn     = socket.getfqdn()
+			self.log.info("chosen hostname: " + self.hostname)
+			self.log.info("chosen fqdn: " + self.fqdn)
 
-			if os.path.isfile(network_config_file): 
+			## register with diorite using vmauth (rather than username/password)
+			try:
+				payload = {'ident': self.ident, 'hostname': self.fqdn, 'uuid': self.vmuuid}
+				r = requests.post(self.config['diorite_url'] + 'vmauth', data=payload, verify = self.config['diorite_ca'])
+			except Exception as ex:
+				self.log.error("error contacting registration server: " + str(ex))
+				self.auth_error.set_text("Error contacting registration server: " + str(ex))
+				return
+
+			if r.status_code == 200:
 				try:
-					with open(network_config_file, "r") as netcfg_file:
-						netcfg = netcfg_file.readlines()
-				except Exception as e:
-					self.add_msg("WARNING: could not read the system network config file " + network_config_file)
-					self.add_msg("WARNING: Because I can't read the existing config file the system configuration might not work")
-					self.add_msg(str(e))
-					netcfg = []
-					self.warnings = self.warnings + 1
-			else:
-				self.add_msg("WARNING: There is no system network config file on this system!")
-				self.add_msg("WARNING: Because I can't read the existing config file the system configuration might not work")
-				netcfg = []
-				self.warnings = self.warnings + 1
-
-			found_hostname = False
-			for i, line in enumerate(netcfg):
-				if line.startswith('HOSTNAME'):
-					found_hostname = True
-					netcfg[i] = "HOSTNAME=" + self.hostname + "\n"
-
-			if not found_hostname:
-				netcfg.append("HOSTNAME=" + self.hostname + "\n")
-
-			self.add_msg("Network: Saving new global configuration with updated hostname")
-			try:
-				with open(network_config_file, "w") as fp:
-					for line in netcfg:
-						fp.write(line)
-				self.add_msg("Network: Saved new global configuration")
-			except Exception as e:
-				self.fatal("Could not write to system network config file " + network_config_file + ":\n" + str(ex))
-				return
-
-			## Set hostname live now as well 
-			self.add_msg("Network: Setting runtime hostname")
-			(code, stdout, stderr) = self.sysexec(["/bin/hostname",self.hostname])
-
-			if code != 0:
-				self.fatal("Could not set runtime hostname: \n" + stdout + "\n" + stderr)
-				return
-
-		## 2. FQDN #############################################################
-
-		## set fqdn if not using dhcp
-		if self.dhcp == False:
-			try:
-				with open("/etc/hosts", "a") as hosts_file:
-					hosts_file.write(self.ipaddr + "\t" + self.fqdn + "\t" + self.hostname)
-			except Exception as e:
-				self.add_msg("WARNING: could not set fqdn in /etc/hosts:")
-				self.add_msg(str(e))
-				self.warnings = self.warnings + 1
-
-		## dhcp hosts file is set via puppet on each ip address change - we dont need to do it
-
-		## 3. NETWORK ##########################################################
-
-		## turn off network manager
-		if not self.fromTemplate:
-			if self.release == 7:
-				self.add_msg("Network: Stopping NetworkManager")
-				(code, stdout, stderr) = self.sysexec(["/bin/systemctl","stop","NetworkManager"])
-
-				if code != 0:
-					self.fatal("Could not stop the NetworkManager service: \n" + stdout + "\n" + stderr)
+					self.json = r.json()
+					self.puppet_private_key = self.json['private_key']
+					self.puppet_public_key  = self.json['public_key']
+					self.puppet_cert        = self.json['cert']
+					self.sat_activation_key = self.json['satellite_activation_key']
+				except Exception as ex:
+					self.fatal("Could not parse return response from the diorite registration server: " + str(ex))
 					return
 
+				self.view_go()
+				return	
+			elif r.status_code == 501:
+				self.fatal("The diorite registration server does not support vmware UUID authentication")
+				return
+			elif r.status_code == 403:
+				self.fatal("The diorite registration server rejected our registration request (incorrect UUID/fqdn)")
+				return
+			else:
+				self.fatal("Unexpected response code from diorite registration server: " + str(r.status_code))
+				return
+
+
+		## networking is done via vmware in a template
+		if not self.fromTemplate:
+
+			## 1. HOSTNAME #########################################################
+
+			## RHEL7 hostname
+			if self.release == 7:
+				(code, stdout, stderr) = self.sysexec(["/bin/hostnamectl","set-hostname",self.hostname])
+
+				if code != 0:
+					self.fatal("Network: Setting hostname failed: \n" + stdout + "\n" + stderr)
+					return
+				else:
+					self.add_msg("Network: Hostname set to '" + self.hostname + "'")
+
+			## RHEL6 hostname
 			elif self.release == 6:
-				if os.path.exists("/etc/init.d/NetworkManager"):
+				network_config_file = "/etc/sysconfig/network"
+				self.add_msg("Network: Reading global configuration (" + network_config_file + ")")
+
+				if os.path.isfile(network_config_file): 
+					try:
+						with open(network_config_file, "r") as netcfg_file:
+							netcfg = netcfg_file.readlines()
+					except Exception as e:
+						self.add_msg("WARNING: could not read the system network config file " + network_config_file)
+						self.add_msg("WARNING: Because I can't read the existing config file the system configuration might not work")
+						self.add_msg(str(e))
+						netcfg = []
+						self.warnings = self.warnings + 1
+				else:
+					self.add_msg("WARNING: There is no system network config file on this system!")
+					self.add_msg("WARNING: Because I can't read the existing config file the system configuration might not work")
+					netcfg = []
+					self.warnings = self.warnings + 1
+
+				found_hostname = False
+				for i, line in enumerate(netcfg):
+					if line.startswith('HOSTNAME'):
+						found_hostname = True
+						netcfg[i] = "HOSTNAME=" + self.hostname + "\n"
+
+				if not found_hostname:
+					netcfg.append("HOSTNAME=" + self.hostname + "\n")
+
+				self.add_msg("Network: Saving new global configuration with updated hostname")
+				try:
+					with open(network_config_file, "w") as fp:
+						for line in netcfg:
+							fp.write(line)
+					self.add_msg("Network: Saved new global configuration")
+				except Exception as e:
+					self.fatal("Could not write to system network config file " + network_config_file + ":\n" + str(ex))
+					return
+
+				## Set hostname live now as well 
+				self.add_msg("Network: Setting runtime hostname")
+				(code, stdout, stderr) = self.sysexec(["/bin/hostname",self.hostname])
+
+				if code != 0:
+					self.fatal("Could not set runtime hostname: \n" + stdout + "\n" + stderr)
+					return
+
+			## 2. FQDN #############################################################
+
+			## set fqdn if not using dhcp
+			if self.dhcp == False:
+				try:
+					with open("/etc/hosts", "a") as hosts_file:
+						hosts_file.write(self.ipaddr + "\t" + self.fqdn + "\t" + self.hostname)
+				except Exception as e:
+					self.add_msg("WARNING: could not set fqdn in /etc/hosts:")
+					self.add_msg(str(e))
+					self.warnings = self.warnings + 1
+
+			## dhcp hosts file is set via puppet on each ip address change - we dont need to do it
+
+			## 3. NETWORK ##########################################################
+
+			## turn off network manager
+			if not self.fromTemplate:
+				if self.release == 7:
 					self.add_msg("Network: Stopping NetworkManager")
-					(code, stdout, stderr) = self.sysexec(["/sbin/service","NetworkManager","stop"])
+					(code, stdout, stderr) = self.sysexec(["/bin/systemctl","stop","NetworkManager"])
 
 					if code != 0:
 						self.fatal("Could not stop the NetworkManager service: \n" + stdout + "\n" + stderr)
 						return
 
-		## check the config file exists (it should...)
-		self.add_msg("Network: Reading interface configuration")
-		network_config_file = "/etc/sysconfig/network-scripts/ifcfg-" + self.netif
-		if os.path.isfile(network_config_file):
-			try:
-				with open(network_config_file, "r") as netcfg_file:
-					netcfg = netcfg_file.readlines()
-			except Exception as e:
-				self.add_msg("WARNING: could not read network config file " + network_config_file)
-				self.add_msg("WARNING: Because I can't read the existing config file the network interface is unlikely to work")
-				self.add_msg(str(e))
+				elif self.release == 6:
+					if os.path.exists("/etc/init.d/NetworkManager"):
+						self.add_msg("Network: Stopping NetworkManager")
+						(code, stdout, stderr) = self.sysexec(["/sbin/service","NetworkManager","stop"])
+
+						if code != 0:
+							self.fatal("Could not stop the NetworkManager service: \n" + stdout + "\n" + stderr)
+							return
+
+			## check the config file exists (it should...)
+			self.add_msg("Network: Reading interface configuration")
+			network_config_file = "/etc/sysconfig/network-scripts/ifcfg-" + self.netif
+			if os.path.isfile(network_config_file):
+				try:
+					with open(network_config_file, "r") as netcfg_file:
+						netcfg = netcfg_file.readlines()
+				except Exception as e:
+					self.add_msg("WARNING: could not read network config file " + network_config_file)
+					self.add_msg("WARNING: Because I can't read the existing config file the network interface is unlikely to work")
+					self.add_msg(str(e))
+					netcfg = []
+					self.warnings = self.warnings + 1
+			else:
+				self.add_msg("WARNING: No existing network configuration file found for interface " + self.netif)
+				self.add_msg("WARNING: Because there is no existing config file the network interface is unlikely to work")
 				netcfg = []
 				self.warnings = self.warnings + 1
-		else:
-			self.add_msg("WARNING: No existing network configuration file found for interface " + self.netif)
-			self.add_msg("WARNING: Because there is no existing config file the network interface is unlikely to work")
-			netcfg = []
-			self.warnings = self.warnings + 1
 
-		self.add_msg("Network: Generating new interface configuration")
+			self.add_msg("Network: Generating new interface configuration")
 
-		## remove parts of the existing file we dont want
-		netcfg = [x for x in netcfg if self.netcfg_remove(x)]
+			## remove parts of the existing file we dont want
+			netcfg = [x for x in netcfg if self.netcfg_remove(x)]
 
-		## now add in what we want
-		netcfg.append("PEERDNS=no\n")
+			## now add in what we want
+			netcfg.append("PEERDNS=no\n")
 
-		if self.dhcp:
-			netcfg.append("BOOTPROTO=dhcp\n")
-		else:
-			netcfg.append("BOOTPROTO=static\n")
-			netcfg.append("IPADDR=" + self.ipaddr + "\n")
-			netcfg.append("NETMASK=" + str(self.netmask) + "\n")
-			netcfg.append("GATEWAY=" + self.router + "\n")
+			if self.dhcp:
+				netcfg.append("BOOTPROTO=dhcp\n")
+			else:
+				netcfg.append("BOOTPROTO=static\n")
+				netcfg.append("IPADDR=" + self.ipaddr + "\n")
+				netcfg.append("NETMASK=" + str(self.netmask) + "\n")
+				netcfg.append("GATEWAY=" + self.router + "\n")
 
-		if self.release == 6:
-			netcfg.append("NM_CONTROLLED=no\n")
+			if self.release == 6:
+				netcfg.append("NM_CONTROLLED=no\n")
 
-		## now write out the file
-		self.add_msg("Network: Saving new interface configuration")
-		try:
-			with open(network_config_file, "w") as fp:
-				for line in netcfg:
-					fp.write(line)
-			self.add_msg("Network: Saved new interface configuration")
-		except Exception as e:
-			self.fatal("Could not write to network config file " + network_config_file + ":\n" + str(ex))
-			return
+			## now write out the file
+			self.add_msg("Network: Saving new interface configuration")
+			try:
+				with open(network_config_file, "w") as fp:
+					for line in netcfg:
+						fp.write(line)
+				self.add_msg("Network: Saved new interface configuration")
+			except Exception as e:
+				self.fatal("Could not write to network config file " + network_config_file + ":\n" + str(ex))
+				return
 
-		## restart the network interface using ifdown/ifup
-		self.add_msg("Network: Stopping interface " + self.netif)
-		(code, stdout, stderr) = self.sysexec(["/sbin/ifdown",self.netif])
+			## restart the network interface using ifdown/ifup
+			self.add_msg("Network: Stopping interface " + self.netif)
+			(code, stdout, stderr) = self.sysexec(["/sbin/ifdown",self.netif])
 
-		if code != 0:
-			self.fatal("Could not stop network interface " + self.netif + ": \n" + stdout + "\n" + stderr)
-			return
+			if code != 0:
+				self.fatal("Could not stop network interface " + self.netif + ": \n" + stdout + "\n" + stderr)
+				return
 
-		self.add_msg("Network: Starting interface " + self.netif)
-		(code, stdout, stderr) = self.sysexec(["/sbin/ifup",self.netif])
+			self.add_msg("Network: Starting interface " + self.netif)
+			(code, stdout, stderr) = self.sysexec(["/sbin/ifup",self.netif])
 
-		if code != 0:
-			self.fatal("Could not start network interface " + self.netif + ": \n" + stdout + "\n" + stderr)
-			return
-		else:
-			self.add_msg("Network: Started interface " + self.netif)
+			if code != 0:
+				self.fatal("Could not start network interface " + self.netif + ": \n" + stdout + "\n" + stderr)
+				return
+			else:
+				self.add_msg("Network: Started interface " + self.netif)
 
-		## because we set PEERDNS=no in the network settings the system has no idea, even with dhcp, what dns servers to use.
-		## puppet will set them later, but we still need dns servers before that, so we'll write out a sample
-		## resolv.conf to bootstrap us to the puppet stage.
-		## we set PEERDNS=no because puppet manages resolv.conf normally and we dont want the network and puppet fighting over the resolv.conf file.
-		self.log.info("Network: Setting DNS Servers")
-		try:
-			with open("/etc/resolv.conf", "w") as fp:
-				fp.write("""search soton.ac.uk
-nameserver 152.78.110.110
-nameserver 152.78.111.81
-nameserver 152.78.111.113
-""")
-		except Exception as ex:
-			self.fatal("Could not write to /etc/resolv.conf:\n" + str(ex))
-			return
+			## because we set PEERDNS=no in the network settings the system has no idea, even with dhcp, what dns servers to use.
+			## puppet will set them later, but we still need dns servers before that, so we'll write out a sample
+			## resolv.conf to bootstrap us to the puppet stage.
+			## we set PEERDNS=no because puppet manages resolv.conf normally and we dont want the network and puppet fighting over the resolv.conf file.
+			self.log.info("Network: Setting DNS Servers")
+			try:
+				with open("/etc/resolv.conf", "w") as fp:
+					fp.write("""search soton.ac.uk
+	nameserver 152.78.110.110
+	nameserver 152.78.111.81
+	nameserver 152.78.111.113
+	""")
+			except Exception as ex:
+				self.fatal("Could not write to /etc/resolv.conf:\n" + str(ex))
+				return
 
 		## 4. RED HAT SATELLITE ################################################
 
+		## satellite cert rpm will already be installed in the template
 		if not self.fromTemplate:
 			self.add_msg("Satellite: Installing certificate RPM")
 			(code, stdout, stderr) = self.sysexec(["rpm","-ivh",self.config['satellite_rpm']])
@@ -664,6 +779,7 @@ nameserver 152.78.111.113
 		else:
 			self.add_msg("Satellite: Katello registration successful")
 
+		## katello-agent rpm will already be installed in the template
 		if not self.fromTemplate:
 			self.add_msg("Satellite: Installing katello-agent")
 			(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install katello-agent",shell=True)
@@ -691,26 +807,27 @@ nameserver 152.78.111.113
 		## messing with it. Puppet won't be working anyway at the moment because tprep
 		## will have wiped its certificates.
 
+		## templates will have puppet running, we want to stop that before we mess with puppet.
 		if self.fromTemplate:
 			if self.release == 7:
-				self.add_msg("Network: Stopping NetworkManager")
+				self.add_msg("Puppet: Stopping agent")
 				(code, stdout, stderr) = self.sysexec(["/bin/systemctl","stop","puppet"])
 
 				if code != 0:
-					self.fatal("Could not stop the NetworkManager service: \n" + stdout + "\n" + stderr)
+					self.fatal("Could not stop the Puppet agent service: \n" + stdout + "\n" + stderr)
 					return
 
 			elif self.release == 6:
-				if os.path.exists("/etc/init.d/NetworkManager"):
-					self.add_msg("Network: Stopping NetworkManager")
-					(code, stdout, stderr) = self.sysexec(["/sbin/service","NetworkManager","stop"])
+				self.add_msg("Puppet: Stopping agent")
+				(code, stdout, stderr) = self.sysexec(["/sbin/service","puppet","stop"])
 
-					if code != 0:
-						self.fatal("Could not stop the NetworkManager service: \n" + stdout + "\n" + stderr)
-						return
+				if code != 0:
+					self.fatal("Could not stop the Puppet agent service: \n" + stdout + "\n" + stderr)
+					return
 
 		# a dependency on our use of puppet is lsb based facter variables
 		# so we install it first.
+		# this will already be installed in the template
 		if not self.fromTemplate:
 			self.add_msg("Puppet: Installing redhat-lsb-core package")
 			(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install redhat-lsb-core",shell=True)
@@ -720,6 +837,7 @@ nameserver 152.78.111.113
 				return
 
 		## INSTALL PUPPET
+		# this will already be installed in the template
 		if not self.fromTemplate:
 			self.add_msg("Puppet: Installing puppet-agent")
 			(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install puppet-agent",shell=True)
@@ -792,7 +910,15 @@ nameserver 152.78.111.113
 				self.add_msg(stderr)
 				self.warnings = self.warnings + 1
 
-		self.view_finish()
+		if self.fromTemplate:
+			if self.warnings > 0:
+				self.view_finish()
+			else:
+				## automated install - so just reboot
+				self.finished()
+		else:
+			## Interactive install
+			self.view_finish()
 
 ################################################################################
 
@@ -833,9 +959,15 @@ nameserver 152.78.111.113
 		self.switch_view(urwid.AttrMap(frame, 'bg'))
 		self.finish = True
 
-	def clean_finish(self):
+################################################################################
+
+	def finished(self):
 		## Mark bonemeal as not starting at reboot
 		os.unlink('/.bonemeal')
+
+		## Delete the template marker file too, if appropriate
+		if self.fromTemplate:
+			os.unlink('/.bonemeal_template')
 
 		## reboot
 		self.sysexec("/sbin/reboot")
@@ -877,10 +1009,12 @@ nameserver 152.78.111.113
 
 		if distid == 'Maipo':
 			self.release = 7
+			self.ident   = 'el7s'
 			self.log.info("Detected operating system as RHEL7: " + distname + " " + distversion + " " + distid)
 			return True
 		elif distid == 'Santiago':
 			self.release = 6
+			self.ident   = 'el6s'
 			self.log.info("Detected operating system as RHEL6: " + distname + " " + distversion + " " + distid)
 			return True
 		else:
@@ -894,7 +1028,7 @@ if '__main__' == __name__:
 	subprocess.call(["/usr/bin/plymouth","quit"])
 
 	try:
-		Bonemeal().main()
+		Bonemeal()
 		subprocess.call(["reset"])
 	except Exception as ex:
 		print "--------------------------------------------------------------------------------"
