@@ -42,7 +42,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-02-06-01'
+	version       = '2016-02-06-02'
 
 	# [bonemeal]
 	config = {
@@ -749,10 +749,10 @@ class Bonemeal:
 			try:
 				with open("/etc/resolv.conf", "w") as fp:
 					fp.write("""search soton.ac.uk
-	nameserver 152.78.110.110
-	nameserver 152.78.111.81
-	nameserver 152.78.111.113
-	""")
+nameserver 152.78.110.110
+nameserver 152.78.111.81
+nameserver 152.78.111.113
+""")
 			except Exception as ex:
 				self.fatal("Could not write to /etc/resolv.conf:\n" + str(ex))
 				return
