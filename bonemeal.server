@@ -42,7 +42,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-02-06-05'
+	version       = '2016-02-06-06'
 
 	# [bonemeal]
 	config = {
@@ -100,20 +100,19 @@ class Bonemeal:
 		self.log.addHandler(fileHandler)
 		self.log.setLevel(logging.INFO)
 
+		if not self.supported_os():
+			raise Exception("Operating system not supported. Only RHEL6 and RHEL7 are supported.")
+
 		# make tab work like down arrow...sort of.
 		urwid.command_map['tab'] = 'cursor down'
 
 		## log the startup
 		self.log.info("bonemeal installer (version " + self.version + ") starting")
 
-		# clean the screen before running
-		subprocess.call(["reset"])
-
 		## Set a nice header/footer on all pages
 		self.setup_header_footer()
 
 		## Detect if we're doing a 'from template' install
-		self.doAutomated = False
 		if os.path.exists('/.bonemeal_template'):
 			self.fromTemplate = True
 			self.log.info("found template marker file; template mode activated")
@@ -121,10 +120,13 @@ class Bonemeal:
 			## Check if vmware guest customisation has taken place, if not, show an error (reboot /should/ happen after!)
 			if os.path.isfile('/tmp/.vmware-deploy.Done'):
 				view_function = self.view_automated()
-				self.doAutomated = True
 			else:
-				view_function = self.view_automated_wait()
-
+				self.log.warn("vmware guest customisation not yet complete, waiting for reboot")
+				print "[bonemeal] vmware guest customisation not yet complete, waiting for reboot"
+				print "[bonemeal] if you believe this is in error press Ctrl+C now"
+				time.sleep(300)
+				self.log.warn("time expired waiting for reboot - exiting")
+				return
 		else:
 			self.fromTemplate = False
 			view_function = self.view_interactive()
@@ -135,7 +137,7 @@ class Bonemeal:
 
 		## if we're in template mode schedule the automated process to start without
 		## requiring somebody to press a key
-		if self.doAutomated:
+		if self.fromTemplate:
 			self.loop.set_alarm_in(0,self.configure)
 
 		## Run the event loop
@@ -165,14 +167,10 @@ class Bonemeal:
 
 	def unhandled_input(self,key):
 		if not self.fromTemplate:
+
 			if self.start:
-	
-				## Check the OS is supported
-				if not self.supported_os():
-					self.fatal("Your operating system is not supported by this installer. Only RHEL6 and RHEL7 are supported.")
-				else:
-					self.start = False
-					self.view_sethostname()
+				self.start = False
+				self.view_sethostname()
 
 			elif self.finish:
 				self.finished()
@@ -233,20 +231,6 @@ class Bonemeal:
 		bt    = urwid.BigText('I am ready to build', font=urwid.font.HalfBlock5x4Font())
 		btwp  = urwid.Padding(bt, "center", 'clip')
 		txt   = urwid.Text(u"Press any key to get started",align='center')
-		pile1 = urwid.Pile([btwp,div,txt])
-		pile1 = urwid.Filler(pile1, 'middle', None, 7)
-		frame = urwid.Frame(header=self.header, body=pile1, footer=self.footer)
-
-		return urwid.AttrMap(frame, 'bg')
-
-################################################################################
-## AUTOMATED MODE - waiting for vmware guest customisations
-
-	def view_automated_wait(self):
-		div   = urwid.Divider()
-		bt    = urwid.BigText('automated install', font=urwid.font.HalfBlock5x4Font())
-		btwp  = urwid.Padding(bt, "center", 'clip')
-		txt   = urwid.Text(u"waiting for vmware guest customisation",align='center')
 		pile1 = urwid.Pile([btwp,div,txt])
 		pile1 = urwid.Filler(pile1, 'middle', None, 7)
 		frame = urwid.Frame(header=self.header, body=pile1, footer=self.footer)
@@ -526,14 +510,10 @@ class Bonemeal:
 		self.warnings = 0
 
 		if self.fromTemplate:
-			## We haven't checked if we're running on a supported OS yet
-			## normally this is done when the user first presses a key
-			if not self.supported_os():
-				self.fatal("Your operating system is not supported by this installer. Only RHEL6 and RHEL7 are supported.")
-				return
-
 			## We need to authenticate with hostname and VM UUID to get 
 			## puppet certs and rhn activation keys
+
+			self.log.info("Detecting system UUID")
 
 			## Get the system UUID which is the VMWare UUID which acts as the 'password'
 			try:
@@ -542,13 +522,19 @@ class Bonemeal:
 				self.fatal("Could not read system UUID\n + str(ex)")
 				return
 
+			self.log.info("Detected system UUID as " + self.vmuuid)
+			self.add_msg("Detected system UUID as " + self.vmuuid)
+
 			## Read the hostname and FQDN
 			self.hostname = socket.gethostname()
 			self.fqdn     = socket.getfqdn()
-			self.log.info("chosen hostname: " + self.hostname)
-			self.log.info("chosen fqdn: " + self.fqdn)
+			self.log.info("Using hostname: " + self.hostname)
+			self.log.info("Using fqdn: " + self.fqdn)
 
 			## register with diorite using vmauth (rather than username/password)
+			self.log.info("Registering with diorite registration server using vmauth")
+			self.add_msg("Registering with diorite registration server using vmauth")
+			
 			try:
 				payload = {'ident': self.ident, 'hostname': self.fqdn, 'uuid': self.vmuuid}
 				r = requests.post(self.config['diorite_url'] + 'vmauth', data=payload, verify = self.config['diorite_ca'])
@@ -559,7 +545,8 @@ class Bonemeal:
 
 			if r.status_code == 200:
 				try:
-					self.log.error("diorite server returned 200 OK response")
+					self.log.error("diorite registration server returned 200 OK response")
+					self.add_msg("Registration successful")
 					self.json = r.json()
 					self.puppet_private_key = self.json['private_key']
 					self.puppet_public_key  = self.json['public_key']
@@ -649,7 +636,7 @@ class Bonemeal:
 			if self.dhcp == False:
 				try:
 					with open("/etc/hosts", "a") as hosts_file:
-						hosts_file.write(self.ipaddr + "\t" + self.fqdn + "\t" + self.hostname)
+						hosts_file.write("127.0.1.1\t" + self.fqdn + "\t" + self.hostname)
 				except Exception as e:
 					self.add_msg("WARNING: could not set fqdn in /etc/hosts:")
 					self.add_msg(str(e))
