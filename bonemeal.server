@@ -42,7 +42,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-02-06-03'
+	version       = '2016-02-06-05'
 
 	# [bonemeal]
 	config = {
@@ -113,6 +113,7 @@ class Bonemeal:
 		self.setup_header_footer()
 
 		## Detect if we're doing a 'from template' install
+		self.doAutomated = False
 		if os.path.exists('/.bonemeal_template'):
 			self.fromTemplate = True
 			self.log.info("found template marker file; template mode activated")
@@ -120,6 +121,7 @@ class Bonemeal:
 			## Check if vmware guest customisation has taken place, if not, show an error (reboot /should/ happen after!)
 			if os.path.isfile('/tmp/.vmware-deploy.Done'):
 				view_function = self.view_automated()
+				self.doAutomated = True
 			else:
 				view_function = self.view_automated_wait()
 
@@ -133,7 +135,7 @@ class Bonemeal:
 
 		## if we're in template mode schedule the automated process to start without
 		## requiring somebody to press a key
-		if self.fromTemplate:
+		if self.doAutomated:
 			self.loop.set_alarm_in(0,self.configure)
 
 		## Run the event loop
@@ -567,8 +569,6 @@ class Bonemeal:
 					self.fatal("Could not parse return response from the diorite registration server: " + str(ex))
 					return
 
-				self.view_go()
-				return	
 			elif r.status_code == 501:
 				self.fatal("The diorite registration server does not support vmware UUID authentication")
 				return
