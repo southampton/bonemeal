@@ -42,7 +42,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-02-10-01'
+	version       = '2016-02-10-02'
 
 	# [bonemeal]
 	config = {
@@ -119,14 +119,16 @@ class Bonemeal:
 			(code, stdout, stderr) = self.sysexec(['/usr/bin/vmware-rpctool', 'info-get guestinfo.cortex.customisation'])
 
 			if code != 0:
-				self.log.warn("vmware guestinfo variable not found, switching to interactive installer")
+				self.log.info("vmware guestinfo variable not found, switching to interactive installer")
 			else:
-				self.log.warn("vmware guestinfo variable found")
+				self.log.info("vmware guestinfo variable found")
 				self.fromTemplate = True
 
 				if 'complete' in stdout:
+					self.log.info("vmware guest customisations are complete")
 					view_function = self.view_automated()
 				else:
+					self.log.info("vmware guest customisations are not yet complete")
 					print "[bonemeal] vmware guest customisation is not complete, waiting for reboot"
 					print "[bonemeal] to override this press Ctrl+C to start RHEL normally"	
 
@@ -540,7 +542,6 @@ class Bonemeal:
 			self.log.info("Using fqdn: " + self.fqdn)
 
 			## register with diorite using vmauth (rather than username/password)
-			self.log.info("Registering with diorite registration server using vmauth")
 			self.add_msg("Registering with diorite registration server using vmauth")
 			
 			try:
