@@ -532,7 +532,6 @@ class Bonemeal:
 				self.fatal("Could not read system UUID\n + str(ex)")
 				return
 
-			self.log.info("Detected system UUID as " + self.vmuuid)
 			self.add_msg("Detected system UUID as " + self.vmuuid)
 
 			## Read the hostname and FQDN
