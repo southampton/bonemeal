@@ -42,7 +42,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-02-10-02'
+	version       = '2016-02-10-03'
 
 	# [bonemeal]
 	config = {
@@ -96,7 +96,7 @@ class Bonemeal:
 		# logging
 		self.log    = logging.getLogger("bonemeal")
 		fileHandler = logging.FileHandler(self.config['log_file'])
-		fileHandler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'))
+		fileHandler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s: %(message)s'))
 		self.log.addHandler(fileHandler)
 		self.log.setLevel(logging.INFO)
 
@@ -120,6 +120,7 @@ class Bonemeal:
 
 			if code != 0:
 				self.log.info("vmware guestinfo variable not found, switching to interactive installer")
+				view_function = self.view_interactive()
 			else:
 				self.log.info("vmware guestinfo variable found")
 				self.fromTemplate = True
