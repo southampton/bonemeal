@@ -553,7 +553,7 @@ class Bonemeal:
 
 			if r.status_code == 200:
 				try:
-					self.log.error("diorite registration server returned 200 OK response")
+					self.log.info("diorite registration server returned 200 OK response")
 					self.add_msg("Registration successful")
 					self.json = r.json()
 					self.puppet_private_key = self.json['private_key']
