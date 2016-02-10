@@ -59,10 +59,10 @@ class Bonemeal:
 	## colour setup
 	palette = [
 		('edit', 'black', 'light gray'),
-        ('header',       'white',      'dark red',   'bold'),
-        ('label',       'white',      'dark blue',   'bold'),
-		('bg','white','dark blue'),
-		('error','yellow','dark blue')
+		('header', 'white', 'dark red', 'bold'),
+		('label', 'white', 'dark blue', 'bold'),
+		('bg', 'white', 'dark blue'),
+		('error', 'yellow', 'dark blue')
 		]
 
 	## state handling for unhandled input
@@ -100,37 +100,45 @@ class Bonemeal:
 		self.log.addHandler(fileHandler)
 		self.log.setLevel(logging.INFO)
 
-		if not self.supported_os():
-			raise Exception("Operating system not supported. Only RHEL6 and RHEL7 are supported.")
-
-		# make tab work like down arrow...sort of.
-		urwid.command_map['tab'] = 'cursor down'
-
 		## log the startup
 		self.log.info("bonemeal installer (version " + self.version + ") starting")
 
-		## Set a nice header/footer on all pages
-		self.setup_header_footer()
+		## detect the OS
+		if not self.supported_os():
+			raise Exception("Operating system not supported. Only RHEL6 and RHEL7 are supported.")
 
 		## Detect if we're doing a 'from template' install
 		if os.path.exists('/.bonemeal_template'):
-			self.fromTemplate = True
-			self.log.info("found template marker file; template mode activated")
+			self.log.info("found template marker file; checking for vmware guestinfo variable")
 			
-			## Check if vmware guest customisation has taken place, if not, show an error (reboot /should/ happen after!)
-			if os.path.isfile('/tmp/.vmware-deploy.Done'):
-				view_function = self.view_automated()
+			## Check the status of the vmware guest customisations
+			
+			(code, stdout, stderr) = self.sysexec(['/usr/bin/vmware-rpctool', 'info-get guestinfo.cortex.customisation'])
+
+			if code != 0:
+				self.log.warn("vmware guestinfo variable not found, switching to interactive installer")
 			else:
-				self.log.warn("vmware guest customisation not yet complete, waiting for reboot")
-				print "[bonemeal] vmware guest customisation not yet complete, waiting for reboot"
-				print "[bonemeal] if you believe this is in error press Ctrl+C now"
-				time.sleep(300)
-				self.log.warn("time expired waiting for reboot - exiting")
-				return
+				self.log.warn("vmware guestinfo variable found")
+				self.fromTemplate = True
+
+				if 'complete' in stdout:
+					view_function = self.view_automated()
+				else:
+					print "[bonemeal] vmware guest customisation is not complete, waiting for reboot"
+					print "[bonemeal] to override this press Ctrl+C to start RHEL normally"	
+
+					## sleep forever because vmware guest customisations will reboot the OS when complete
+					while True:
+						time.sleep(300)
 		else:
 			self.fromTemplate = False
 			view_function = self.view_interactive()
 
+		## Set a nice header/footer on all views
+		self.setup_header_footer()
+
+		# make tab work like down arrow...sort of.
+		urwid.command_map['tab'] = 'cursor down'
 
 		## Create the main loop
 		self.loop = urwid.MainLoop(view_function, self.palette, unhandled_input=self.unhandled_input, handle_mouse=False)
