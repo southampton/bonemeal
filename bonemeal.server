@@ -42,7 +42,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-02-10-03'
+	version       = '2016-02-10-04'
 
 	# [bonemeal]
 	config = {
@@ -111,6 +111,7 @@ class Bonemeal:
 		self.setup_header_footer()
 
 		## Detect if we're doing a 'from template' install
+		self.fromTemplate = False
 		if os.path.exists('/.bonemeal_template'):
 			self.log.info("found template marker file; checking for vmware guestinfo variable")
 			
@@ -137,7 +138,6 @@ class Bonemeal:
 					while True:
 						time.sleep(300)
 		else:
-			self.fromTemplate = False
 			view_function = self.view_interactive()
 
 		# make tab work like down arrow...sort of.
