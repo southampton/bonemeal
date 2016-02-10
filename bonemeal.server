@@ -107,6 +107,9 @@ class Bonemeal:
 		if not self.supported_os():
 			raise Exception("Operating system not supported. Only RHEL6 and RHEL7 are supported.")
 
+		## Set a nice header/footer on all views
+		self.setup_header_footer()
+
 		## Detect if we're doing a 'from template' install
 		if os.path.exists('/.bonemeal_template'):
 			self.log.info("found template marker file; checking for vmware guestinfo variable")
@@ -133,9 +136,6 @@ class Bonemeal:
 		else:
 			self.fromTemplate = False
 			view_function = self.view_interactive()
-
-		## Set a nice header/footer on all views
-		self.setup_header_footer()
 
 		# make tab work like down arrow...sort of.
 		urwid.command_map['tab'] = 'cursor down'
