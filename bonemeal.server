@@ -42,7 +42,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-02-13-01'
+	version       = '2016-02-13-02'
 
 	# [bonemeal]
 	config = {
@@ -84,6 +84,13 @@ class Bonemeal:
 			for key in self.config.keys():
 				if configParser.has_option('bonemeal',key):
 					self.config[key] = configParser.get('bonemeal',key)
+
+			# cortex_verify should be loaded in as a boolean if it is 'no', 'yes', 'True' or 'False'
+			try:
+				self.config['cortex_verify'] = configParser.getboolean('bonemeal','cortex_verify')
+			except ValueError as ex:
+				## don't care, it wasn't a boolean, so we'll just use the value already loaded (str)
+				pass
 
 		except Exception as ex:
 			print "[bonemeal] Could not read from config file " + CONFIG_FILE + ": " + str(ex)
