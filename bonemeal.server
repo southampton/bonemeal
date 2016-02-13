@@ -42,7 +42,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-02-13-02'
+	version       = '2016-02-13-03'
 
 	# [bonemeal]
 	config = {
@@ -600,9 +600,9 @@ class Bonemeal:
 					return
 
 
-			self.add_msg("Cortex: IP Address will be set to: " + self.ipaddr)
-			self.add_msg("Cortex: Netmask will be set to: " + self.netmask)
-			self.add_msg("Cortex: Router will be set to: " + self.router)
+				self.add_msg("Cortex: IP Address will be set to: " + self.ipaddr)
+				self.add_msg("Cortex: Netmask will be set to: " + self.netmask)
+				self.add_msg("Cortex: Router will be set to: " + self.router)
 
 		## 1. HOSTNAME #########################################################
 
