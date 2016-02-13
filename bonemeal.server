@@ -584,7 +584,7 @@ class Bonemeal:
 			self.add_msg("Cortex: Chosen network interface is: " + self.netif)
 
 			## Now process the given ip address
-			if self.ipaddr.lower().contains('dhcp'):
+			if 'dhcp' in self.ipaddr.lower():
 				self.dhcp = True
 				self.add_msg("Cortex: Networking set to DHCP")
 			else:
