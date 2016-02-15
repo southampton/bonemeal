@@ -171,7 +171,7 @@ class Bonemeal:
 			## any input on the finish screen should quit the installer
 			self.exit_installer()
 
-		elif not self.fromTemplate and if self.start:
+		elif not self.fromTemplate and self.start:
 			## start screen - jump to the first input
 			self.start = False
 			self.view_sethostname()
