@@ -42,7 +42,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-02-13-03'
+	version       = '2016-02-13-04'
 
 	# [bonemeal]
 	config = {
@@ -457,7 +457,7 @@ class Bonemeal:
 		## python requests call with SSL...
 		try:
 			payload = {'ident': self.ident, 'hostname': self.fqdn, 'username': self.username.get_edit_text(), 'password': self.password.get_edit_text()}
-			r = requests.post(self.config['cortex_url'] + "/api/register", data=payload, verify = self.config['cortex_verify'])
+			r = requests.post(self.config['cortex_url'] + "api/register", data=payload, verify = self.config['cortex_verify'])
 		except Exception as ex:
 			self.log.error("error contacting registration server: " + type(ex).__name__ + ": " + str(ex))
 			self.auth_error.set_text("Error contacting registration server: " + type(ex).__name__ + ": " + str(ex))
@@ -533,7 +533,7 @@ class Bonemeal:
 			
 			try:
 				payload = {'ident': self.ident, 'uuid': self.vmuuid}
-				r = requests.post(self.config['cortex_url'] + "/api/register", data=payload, verify = self.config['cortex_verify'])
+				r = requests.post(self.config['cortex_url'] + "api/register", data=payload, verify = self.config['cortex_verify'])
 			except Exception as ex:
 				self.fatal("An error occured when attempting to contact cortex: \n" + type(ex).__name__ + ": " + type(ex).__name__ + ": " + str(ex))
 				return
@@ -943,7 +943,7 @@ nameserver 152.78.111.113
 			## update the server to say we're done installing
 			try:
 				payload = {'uuid': self.vmuuid}
-				r = requests.post(self.config['cortex_url'] + "/api/notify", data=payload, verify = self.config['cortex_verify'])
+				r = requests.post(self.config['cortex_url'] + "api/installer/notify", data=payload, verify = self.config['cortex_verify'])
 
 				if r.status_code != 200:
 					raise Exception("non-200 response from cortex")
@@ -976,6 +976,8 @@ nameserver 152.78.111.113
 ## FINISH SCREEN
 
 	def view_finish(self):
+		self.finish = True
+
 		## clear standard input so if the user pressed buttons during the install script, clear them away
 		termios.tcflush(sys.stdin,termios.TCIOFLUSH)
 
@@ -998,7 +1000,6 @@ nameserver 152.78.111.113
 
 		frame = urwid.Frame(header=self.header, body=pile1, footer=self.footer)
 		self.switch_view(urwid.AttrMap(frame, 'bg'))
-		self.finish = True
 
 ################################################################################
 
