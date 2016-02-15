@@ -42,7 +42,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-02-13-04'
+	version       = '2016-02-13-05'
 
 	# [bonemeal]
 	config = {
@@ -162,17 +162,19 @@ class Bonemeal:
 ################################################################################
 
 	def unhandled_input(self,key):
-		if not self.fromTemplate:
 
-			if self.start:
-				self.start = False
-				self.view_sethostname()
+		if key == 'Q':
+			## always quit on Shift+Q
+			self.handle_exit()
 
-			elif self.finish:
-				self.finished()
+		elif self.finish:
+			## any input on the finish screen should quit the installer
+			self.exit_installer()
 
-			elif key == 'Q':
-				self.handle_exit()
+		elif not self.fromTemplate and if self.start:
+			## start screen - jump to the first input
+			self.start = False
+			self.view_sethostname()
 
 ################################################################################
 
@@ -956,7 +958,7 @@ nameserver 152.78.111.113
 				self.view_finish()
 			else:
 				## automated install - so just reboot
-				self.finished()
+				self.exit_installer()
 		else:
 			## Interactive install
 			self.view_finish()
@@ -1003,7 +1005,7 @@ nameserver 152.78.111.113
 
 ################################################################################
 
-	def finished(self):
+	def exit_installer(self):
 		## Mark bonemeal as not starting at reboot
 		os.unlink('/.bonemeal')
 
