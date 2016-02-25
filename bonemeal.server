@@ -42,7 +42,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-02-13-05'
+	version       = '2016-02-25-01'
 
 	# [bonemeal]
 	config = {
@@ -54,6 +54,7 @@ class Bonemeal:
 		'cortex_url'    : 'https://cortex.domain.tld/',
 		'cortex_verify' : False,
 		'satellite_rpm' : 'http://satellite.yourdomain.tld/pub/katello-ca-consumer-latest.noarch.rpm',
+		'satellite6'    : False, # if false, assumes you have Satellite 5 rather than 6.
 	}
 
 	## colour setup
@@ -789,36 +790,124 @@ nameserver 152.78.111.113
 
 		## 4. RED HAT SATELLITE ################################################
 
-		## satellite cert rpm will already be installed in the template
-		if not self.fromTemplate:
-			self.add_msg("Satellite: Installing certificate RPM")
-			(code, stdout, stderr) = self.sysexec(["rpm","-ivh",self.config['satellite_rpm']])
+		if self.config['satellite6']:
+
+			## SATELLITE 6
+
+			## satellite cert rpm will already be installed in the template
+			if not self.fromTemplate:
+				self.add_msg("Satellite: Installing certificate RPM")
+				(code, stdout, stderr) = self.sysexec(["rpm","-ivh",self.config['satellite_rpm']])
+
+				if code != 0:
+					self.add_msg("WARNING: could not install certificate RPM for satellite:")
+					self.add_msg(stdout)
+					self.add_msg(stderr)
+					self.warnings = self.warnings + 1
+
+			self.add_msg("Satellite: Registering with Katello")
+			(code, stdout, stderr) = self.sysexec('/usr/sbin/subscription-manager register --org="University_of_Southampton" --activationkey="' + self.sat_activation_key + '"',shell=True) 
 
 			if code != 0:
-				self.add_msg("WARNING: could not install certificate RPM for satellite:")
-				self.add_msg(stdout)
-				self.add_msg(stderr)
-				self.warnings = self.warnings + 1
-
-		self.add_msg("Satellite: Registering with Katello")
-		(code, stdout, stderr) = self.sysexec('/usr/sbin/subscription-manager register --org="University_of_Southampton" --activationkey="' + self.sat_activation_key + '"',shell=True) 
-
-		if code != 0:
-			self.fatal("Satellite: Could not register with katello: \n" + stdout + "\n" + stderr)
-			return
-		else:
-			self.add_msg("Satellite: Katello registration successful")
-
-		## katello-agent rpm will already be installed in the template
-		if not self.fromTemplate:
-			self.add_msg("Satellite: Installing katello-agent")
-			(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install katello-agent",shell=True)
-
-			if code != 0:
-				self.fatal("Satellite: Could not install katello-agent: \n" + stdout + "\n" + stderr)
+				self.fatal("Satellite: Could not register with katello: \n" + stdout + "\n" + stderr)
 				return
 			else:
-				self.add_msg("Satellite: Installed katello-agent")
+				self.add_msg("Satellite: Katello registration successful")
+
+			## katello-agent rpm will already be installed in the template
+			if not self.fromTemplate:
+				self.add_msg("Satellite: Installing katello-agent")
+				(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install katello-agent",shell=True)
+
+				if code != 0:
+					self.fatal("Satellite: Could not install katello-agent: \n" + stdout + "\n" + stderr)
+					return
+				else:
+					self.add_msg("Satellite: Installed katello-agent")
+
+		else:
+
+			## SATELLITE 5
+
+			self.add_msg("Satellite: Installing rhn-org-trusted-ssl-cert")
+
+			## See if the rpm is already installed
+			(code, stdout, stderr) = self.sysexec(["/bin/rpm","-qi","rhn-org-trusted-ssl-cert"])
+
+			if code == 0:
+				self.add_msg("NOTICE: rhn-org-trusted-ssl-cert was found to be already installed")
+			else:
+				(code, stdout, stderr) = self.sysexec(["/bin/rpm","-ivh",self.config['satellite_rpm']])
+
+				if code != 0:
+					self.fatal("Could not install satellite SSL certificate RPM: \n" + stdout + "\n" + stderr)
+					return
+
+			self.add_msg("Satellite: Installed rhn-org-trusted-ssl-cert")
+			self.add_msg("Satellite: Installing up2date config file")
+
+			(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/sysconfig/rhn/up2date","https://rhn.soton.ac.uk/pub/up2date","--no-check-certificate"])
+
+			if code != 0:
+				self.fatal("Could not download up2date config file: \n" + stdout + "\n" + stderr)
+				return
+
+			self.add_msg("Satellite: Installed up2date config file")
+			self.add_msg("Satellite: Registering with rhnregks")
+
+			(code, stdout, stderr) = self.sysexec('/usr/sbin/rhnreg_ks --force --activationkey="' + self.rhn_activation_key + '"',shell=True) 
+
+			if code != 0:
+				self.fatal("Could not register with Red Hat Satellite: \n" + stdout + "\n" + stderr)
+				return
+			else:
+				self.add_msg("Satellite: Registration successful")
+
+			## 5. RPM GPG KEYS #####################################################
+
+			## iSolutions GPG Key
+			(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/pki/rpm-gpg/ISOLUTIONS-PUBLIC-KEY","https://rhn.soton.ac.uk/pub/ISOLUTIONS-PUBLIC-KEY","--no-check-certificate"])
+
+			if code != 0:
+				self.fatal("Could not download the iSolutions RPM GPG key: \n" + stdout + "\n" + stderr)
+				return
+
+			(code, stdout, stderr) = self.sysexec(["/bin/rpm","--import","/etc/pki/rpm-gpg/ISOLUTIONS-PUBLIC-KEY"])
+
+			if code != 0:
+				self.fatal("Could not import the iSolutions RPM GPG key: \n" + stdout + "\n" + stderr)
+				return
+
+			if self.release == 7:
+				epel_key = "https://rhn.soton.ac.uk/pub/RPM-GPG-KEY-EPEL-7"
+			elif self.release == 6:
+				epel_key = "https://rhn.soton.ac.uk/pub/RPM-GPG-KEY-EPEL"
+
+			## EPEL GPG Key
+			(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL",epel_key,"--no-check-certificate"])
+
+			if code != 0:
+				self.fatal("Could not download the EPEL RPM GPG key: \n" + stdout + "\n" + stderr)
+				return
+
+			(code, stdout, stderr) = self.sysexec(["/bin/rpm","--import","/etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL"])
+
+			if code != 0:
+				self.fatal("Could not import the EPEL RPM GPG key: \n" + stdout + "\n" + stderr)
+				return
+
+			## PuppetLabs Yum Repository GPG Key
+			(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/pki/rpm-gpg/RPM-GPG-KEY-PUPPET-COLLECTIONS","https://rhn.soton.ac.uk/pub/RPM-GPG-KEY-PUPPET-COLLECTIONS","--no-check-certificate"])
+
+			if code != 0:
+				self.fatal("Could not download the Puppet RPM GPG key: \n" + stdout + "\n" + stderr)
+				return
+
+			(code, stdout, stderr) = self.sysexec(["/bin/rpm","--import","/etc/pki/rpm-gpg/RPM-GPG-KEY-PUPPET-COLLECTIONS"])
+
+			if code != 0:
+				self.fatal("Could not import the Puppet RPM GPG key: \n" + stdout + "\n" + stderr)
+				return
 
 		## 6. YUM UPDATE #######################################################
 
