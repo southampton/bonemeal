@@ -857,7 +857,7 @@ nameserver 152.78.111.113
 			self.add_msg("Satellite: Installed up2date config file")
 			self.add_msg("Satellite: Registering with rhnregks")
 
-			(code, stdout, stderr) = self.sysexec('/usr/sbin/rhnreg_ks --force --activationkey="' + self.rhn_activation_key + '"',shell=True) 
+			(code, stdout, stderr) = self.sysexec('/usr/sbin/rhnreg_ks --force --activationkey="' + self.sat_activation_key + '"',shell=True) 
 
 			if code != 0:
 				self.fatal("Could not register with Red Hat Satellite: \n" + stdout + "\n" + stderr)
