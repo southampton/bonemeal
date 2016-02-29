@@ -42,7 +42,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-02-29-01'
+	version       = '2016-02-29-02'
 
 	# [bonemeal]
 	config = {
@@ -839,17 +839,11 @@ nameserver 152.78.111.113
 
 			self.add_msg("Satellite: Installing rhn-org-trusted-ssl-cert")
 
-			## See if the rpm is already installed
-			(code, stdout, stderr) = self.sysexec(["/bin/rpm","-qi","/tmp/rhn-org-trusted-ssl-cert.rpm"])
+			(code, stdout, stderr) = self.sysexec(["/bin/rpm","-ivh","/tmp/rhn-org-trusted-ssl-cert.rpm"])
 
-			if code == 0:
-				self.add_msg("NOTICE: rhn-org-trusted-ssl-cert was found to be already installed")
-			else:
-				(code, stdout, stderr) = self.sysexec(["/bin/rpm","-ivh",self.config['satellite_rpm']])
-
-				if code != 0:
-					self.fatal("Could not install satellite SSL certificate RPM: \n" + stdout + "\n" + stderr)
-					return
+			if code != 0:
+				self.fatal("Could not install satellite SSL certificate RPM: \n" + stdout + "\n" + stderr)
+				return
 
 			self.add_msg("Satellite: Installed rhn-org-trusted-ssl-cert")
 			self.add_msg("Satellite: Installing up2date config file")
