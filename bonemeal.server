@@ -42,7 +42,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-02-29-02'
+	version       = '2016-03-03-01'
 
 	# [bonemeal]
 	config = {
@@ -969,7 +969,7 @@ nameserver 152.78.111.113
 
 		## SET CONFIG - server
 		self.add_msg("Puppet: Setting master server to " + self.config['puppet_master'])
-		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " config set server " + self.config['puppet_master'],shell=True)
+		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " config set server " + self.config['puppet_master'] + " --section agent",shell=True)
 
 		if code != 0:
 			self.fatal("Could not set puppet master: \n" + stdout + "\n" + stderr)
@@ -977,7 +977,7 @@ nameserver 152.78.111.113
 
 		## SET CONFIG - certname
 		self.add_msg("Puppet: Setting certname to " + self.fqdn)
-		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " config set certname	 " + self.fqdn,shell=True)
+		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " config set certname	 " + self.fqdn + " --section agent",shell=True)
 
 		if code != 0:
 			self.fatal("Could not set puppet certname: \n" + stdout + "\n" + stderr)
