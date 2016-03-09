@@ -11,8 +11,8 @@ if [ -f /.bonemeal ]; then
 	mkdir -p /mnt/build
 	mount -o nolock install.soton.ac.uk:/data/bonemeal /mnt/build
 	cp /mnt/build/bonemeal.server /sbin/soton-setup-run
+	umount /mnt/build
 	chmod 0755 /sbin/soton-setup-run
 
 	/sbin/soton-setup-run
-	umount /mnt/build
 fi
