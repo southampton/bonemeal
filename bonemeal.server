@@ -42,7 +42,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-03-09-02'
+	version       = '2016-03-09-03'
 
 	# [bonemeal]
 	config = {
@@ -851,7 +851,8 @@ nameserver 152.78.111.113
 					self.fatal("Could not install satellite SSL certificate RPM: \n" + stdout + "\n" + stderr)
 					return
 
-			self.add_msg("Satellite: Installed rhn-org-trusted-ssl-cert")
+				self.add_msg("Satellite: Installed rhn-org-trusted-ssl-cert")
+
 			self.add_msg("Satellite: Installing up2date config file")
 
 			(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/sysconfig/rhn/up2date","https://rhn.soton.ac.uk/pub/up2date","--no-check-certificate"])
