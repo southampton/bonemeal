@@ -42,7 +42,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-03-03-01'
+	version       = '2016-03-09-01'
 
 	# [bonemeal]
 	config = {
@@ -839,7 +839,7 @@ nameserver 152.78.111.113
 
 			self.add_msg("Satellite: Installing rhn-org-trusted-ssl-cert")
 
-			(code, stdout, stderr) = self.sysexec(["/bin/rpm","-ivh","/tmp/rhn-org-trusted-ssl-cert.rpm"])
+			(code, stdout, stderr) = self.sysexec(["/bin/rpm","-Uvh","/tmp/rhn-org-trusted-ssl-cert.rpm"])
 
 			if code != 0:
 				self.fatal("Could not install satellite SSL certificate RPM: \n" + stdout + "\n" + stderr)
