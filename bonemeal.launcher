@@ -3,7 +3,7 @@
 if [ -f /.bonemeal ]; then
 
 	## prevent logs from being printed on tty1
-	/bin/dmesg -D
+	/bin/dmesg -n1
 
 	echo "[bonemeal] Updating installer from install.soton.ac.uk..."
 	sleep 5
