@@ -42,7 +42,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-03-09-03'
+	version       = '2016-03-22-01'
 
 	# [bonemeal]
 	config = {
@@ -652,6 +652,9 @@ class Bonemeal:
 
 			if not found_hostname:
 				netcfg.append("HOSTNAME=" + self.hostname + "\n")
+
+			## RHEL6 doesn't send the hostname via DHCP by default because: reasons.
+			netcfg.append("DHCP_HOSTNAME=" + self.hostname + "\n")
 
 			self.add_msg("Network: Saving new global configuration with updated hostname")
 			try:
