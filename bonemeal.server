@@ -42,7 +42,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-03-22-01'
+	version       = '2016-03-23-01'
 
 	# [bonemeal]
 	config = {
@@ -55,6 +55,7 @@ class Bonemeal:
 		'cortex_verify' : False,
 		'satellite_rpm' : 'http://satellite.yourdomain.tld/pub/katello-ca-consumer-latest.noarch.rpm',
 		'satellite6'    : False, # if false, assumes you have Satellite 5 rather than 6.
+		'skip_puppet'   : False, # if true, Puppet steps are skipped - allows for building Puppet servers
 	}
 
 	## colour setup
@@ -225,7 +226,12 @@ class Bonemeal:
 		div   = urwid.Divider()
 		bt    = urwid.BigText('I am ready to build', font=urwid.font.HalfBlock5x4Font())
 		btwp  = urwid.Padding(bt, "center", 'clip')
-		txt   = urwid.Text(u"Press any key to get started",align='center')
+
+		if not self.fromTemplate and self.config['skip_puppet']:
+			txt   = urwid.Text(u"Press any key to get started or Shift+Q to exit\nPuppet steps will be skipped because skip_puppet is set in /etc/bonemeal.conf",align='center')
+		else:
+			txt   = urwid.Text(u"Press any key to get started or Shift+Q to exit",align='center')
+
 		pile1 = urwid.Pile([btwp,div,txt])
 		pile1 = urwid.Filler(pile1, 'middle', None, 7)
 		frame = urwid.Frame(header=self.header, body=pile1, footer=self.footer)
@@ -932,7 +938,7 @@ nameserver 152.78.111.113
 			self.add_msg(stderr)
 			self.warnings = self.warnings + 1
 
-		## 7. PUPPET ###########################################################
+		## 7. PUPPET PREP ######################################################
 
 		## If we are installing from a template then we need to stop puppet running before
 		## messing with it. Puppet won't be working anyway at the moment because tprep
@@ -966,6 +972,10 @@ nameserver 152.78.111.113
 			if code != 0:
 				self.fatal("Could not install redhat-lsb-core: \n" + stdout + "\n" + stderr)
 				return
+
+		## If puppet was set to skip, then quit here.
+		if self.config['skip_puppet'] and not self.fromTemplate:
+			self.view_finish()
 
 		## INSTALL PUPPET
 		# this will already be installed in the template
