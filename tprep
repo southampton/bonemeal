@@ -19,7 +19,7 @@ if [[ $REPLY =~ ^[Yy]([Ee][Ss])?$ ]]; then
 	/bin/rm -f /etc/udev/rules.d/70-persistent-net.rules
 
 	echo " - Removing HWADDR and UUID settings from network config files"
-	/bin/sed -i '/^[ \t]*(HWADDR|UUID)/d' /etc/sysconfig/network-scripts/ifcfg-eth*
+	/bin/sed -i '/^[ \t]*\(HWADDR\|UUID\)/d' /etc/sysconfig/network-scripts/ifcfg-eth*
 
 	echo " - Cleaning up yum data"
 	/usr/bin/yum clean all
@@ -53,9 +53,10 @@ if [[ $REPLY =~ ^[Yy]([Ee][Ss])?$ ]]; then
 	/bin/rm -f /var/log/secure-*
 	/bin/rm -f /var/log/yum-*
 	/bin/rm -f /var/log/up2date-*
+	/bin/rm -f /root/bonemeal-installer.log
 
 	echo " - Remove bash history for root"
-	/bin/rm /root/.bash_history
+	/bin/rm -f /root/.bash_history
 
 	echo " - Removing temporary files"
 	/bin/rm -rf /tmp/*
@@ -64,6 +65,9 @@ if [[ $REPLY =~ ^[Yy]([Ee][Ss])?$ ]]; then
 	echo " - Creating default /etc/hosts"
 	echo "127.0.0.1		localhost localhost.localdomain localhost4 localhost4.localdomain4" > /etc/hosts
 	echo "::1		localhost localhost.localdomain localhost6 localhost6.localdomain6" >> /etc/hosts
+
+	echo " - Removing dhclient exit hooks"
+	/bin/rm -f /etc/dhcp/dhclient-exit-hooks
 
 	echo " - Creating bonemeal marker files"
 	/bin/touch /.bonemeal
