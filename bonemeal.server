@@ -42,7 +42,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-04-01-02'
+	version       = '2016-04-01-03'
 
 	# [bonemeal]
 	config = {
@@ -991,6 +991,7 @@ nameserver 152.78.111.113
 		## If puppet was set to skip, then quit here.
 		if self.config['skip_puppet'] and not self.fromTemplate:
 			self.view_finish()
+			return
 
 		## INSTALL PUPPET
 		# this will already be installed in the template
