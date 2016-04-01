@@ -42,7 +42,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-04-01-01'
+	version       = '2016-04-01-02'
 
 	# [bonemeal]
 	config = {
@@ -91,17 +91,22 @@ class Bonemeal:
 			try:
 				self.config['cortex_verify'] = configParser.getboolean('bonemeal','cortex_verify')
 			except ValueError as ex:
-				## don't care, it wasn't a boolean, so we'll just use the value already loaded (str)
+				pass
+			except ConfigParser.NoOptionError as ex:
 				pass
 
 			try:
 				self.config['satellite6'] = configParser.getboolean('bonemeal','satellite6')
 			except ValueError as ex:
 				pass
+			except ConfigParser.NoOptionError as ex:
+				pass
 
 			try:
 				self.config['skip_puppet'] = configParser.getboolean('bonemeal','skip_puppet')
 			except ValueError as ex:
+				pass
+			except ConfigParser.NoOptionError as ex:
 				pass
 
 		except Exception as ex:
