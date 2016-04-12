@@ -19,6 +19,7 @@ import traceback   # for exception handling
 import sys
 import termios
 import dmidecode
+import shutil
 
 ## NETWORK CONFIGS
 NETWORKS_LIST = [
@@ -42,7 +43,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-04-01-03'
+	version       = '2016-04-12-01'
 
 	# [bonemeal]
 	config = {
@@ -1019,9 +1020,20 @@ nameserver 152.78.111.113
 			self.fatal("Could not set puppet certname: \n" + stdout + "\n" + stderr)
 			return
 
-		## Run Puppet fingerprint. This sets up the SSL dir and generates some files but thats it.
-		self.add_msg("Puppet: Setting up the SSL directory")
+		## Remove existing puppet SSL configuration.
+		self.add_msg("Puppet: Removing existing SSL directory, if any")
+		try:
+			self.log.info("executing shutil.rmtree against path: " + self.config['puppet_ssldir'])
+			shutil.rmtree(self.config['puppet_ssldir'])
+		except Exception as ex:
+			self.fatal("Could not delete existing Puppet SSL directory:\n" + type(ex).__name__ + ": " + str(ex))
+			return				
+
+		self.add_msg("Puppet: Creating new SSL directory")		
 		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " agent --fingerprint",shell=True)
+		if code != 0:
+			self.fatal("Could not create new Puppet SSL directory: \n" + stdout + "\n" + stderr)
+			return
 
 		## Deploy certificates and set certname option in puppet.conf
 		self.add_msg("Puppet: Saving client certificate")
