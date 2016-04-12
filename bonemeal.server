@@ -43,7 +43,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-04-12-01'
+	version       = '2016-04-12-02'
 
 	# [bonemeal]
 	config = {
@@ -1021,13 +1021,14 @@ nameserver 152.78.111.113
 			return
 
 		## Remove existing puppet SSL configuration.
-		self.add_msg("Puppet: Removing existing SSL directory, if any")
-		try:
-			self.log.info("executing shutil.rmtree against path: " + self.config['puppet_ssldir'])
-			shutil.rmtree(self.config['puppet_ssldir'])
-		except Exception as ex:
-			self.fatal("Could not delete existing Puppet SSL directory:\n" + type(ex).__name__ + ": " + str(ex))
-			return				
+		if os.path.exists(self.config['puppet_ssldir']):
+			self.add_msg("Puppet: Removing existing SSL directory, if any")
+			try:
+				self.log.info("executing shutil.rmtree against path: " + self.config['puppet_ssldir'])
+				shutil.rmtree(self.config['puppet_ssldir'])
+			except Exception as ex:
+				self.fatal("Could not delete existing Puppet SSL directory:\n" + type(ex).__name__ + ": " + str(ex))
+				return				
 
 		self.add_msg("Puppet: Creating new SSL directory")		
 		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " agent --fingerprint",shell=True)
