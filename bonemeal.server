@@ -43,7 +43,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-04-12-02'
+	version       = '2016-04-12-03'
 
 	# [bonemeal]
 	config = {
@@ -1031,10 +1031,8 @@ nameserver 152.78.111.113
 				return				
 
 		self.add_msg("Puppet: Creating new SSL directory")		
-		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " agent --fingerprint",shell=True)
-		if code != 0:
-			self.fatal("Could not create new Puppet SSL directory: \n" + stdout + "\n" + stderr)
-			return
+		self.sysexec(self.config['puppet_binary'] + " agent --fingerprint",shell=True)
+		## it will ALWAYS error here (yay puppet), so ignore
 
 		## Deploy certificates and set certname option in puppet.conf
 		self.add_msg("Puppet: Saving client certificate")
