@@ -1004,14 +1004,15 @@ nameserver 152.78.111.113
 						self.fatal("Failed to create filesystem on new logical volume: \n" + stdout + "\n" + stderr)
 						return
 
-					# Filesystem created, update fstab
+					# Filesystem created, update fstab. Note that the newline at the end of the 
+					# fstab append is required (at least in RHEL6, RHEL7 was less irritated by it)
 					self.add_msg("Disks: Filesystem created. Updating fstab")
 					try:
 						with open('/etc/fstab', 'a') as fp:
 							if self.release == 6:
-								fp.write("\nLABEL=data  /srv                   xfs     defaults        0 0")
+								fp.write("\nLABEL=data          /srv           ext4    defaults        0 0\n")
 							elif self.release == 7:
-								fp.write("\nLABEL=data  /srv                   xfs     defaults        0 0")
+								fp.write("\nLABEL=data          /srv           xfs     defaults        0 0\n")
 					except Exception as e:
 						self.fatal("Failed to update fstab: \n" + str(e))
 						return
