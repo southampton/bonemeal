@@ -43,7 +43,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2016-05-03-01'
+	version       = '2016-05-04-01'
 
 	# [bonemeal]
 	config = {
@@ -1077,6 +1077,54 @@ nameserver 152.78.111.113
 				self.add_msg(stdout)
 				self.add_msg(stderr)
 				self.warnings = self.warnings + 1
+
+		## LVMise second disk if it exists
+		if self.fromTemplate:
+			# Check that a second disk exists
+			if os.path.exists('/dev/sdb'):
+				# Log
+				self.add_msg("Disks: Found a second disk, checking for LVM")
+
+				# If it exists, check for an existing LVM PV
+				(code, stdout, stderr) = self.sysexec("/sbin/pvdisplay /dev/sdb")
+
+				# If the exist code is non-zero, assume that it does not exist
+				if code != 0:
+					# We need to create a n LVM physical volume
+					self.add_msg("Disks: No LVM PV found, creating PV")
+					(code, stdout, stderr) = self.sysexec("/sbin/pvcreate -y /dev/sdb")
+
+					if code == 0:
+						# pvcreate succeeded, create a volume group
+						self.add_msg("Disks: Physical volume created. Creating volume group")
+						(code, stdout, stderr) = self.sysexec("/sbin/vgcreate -y datavg /dev/sdb")
+
+						if code == 0:
+							self.add_msg("Disks: Volume group created. Creating logical volume")
+							(code, stdout, stderr) = self.sysexec("/sbin/lvcreate -y -l100%FREE -n data datavg")
+
+							if code == 0:
+								self.add_msg("Disks: Logical volume creation complete")
+							else:
+								self.add_msg("WARNING: Failed to create LVM logical volume")
+								self.add_msg(stdout)
+								self.add_msg(stderr)
+								self.warnings = self.warnings + 1
+						else:
+							self.add_msg("WARNING: Failed to create LVM volume group on /dev/sdb")
+							self.add_msg(stdout)
+							self.add_msg(stderr)
+							self.warnings = self.warnings + 1
+					else:
+						self.add_msg("WARNING: Failed to create LVM PV on /dev/sdb")
+						self.add_msg(stdout)
+						self.add_msg(stderr)
+						self.warnings = self.warnings + 1
+				else:
+					self.add_msg("WARNING: LVM Physical Volume already exists on /dev/sdb - skipping")
+					self.warnings = self.warnings + 1
+			else:
+				self.add_msg("Disks: No second disk detected at /dev/sdb - skipping")
 
 		if self.fromTemplate:
 
