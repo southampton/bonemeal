@@ -965,43 +965,74 @@ nameserver 152.78.111.113
 				# If it exists, check for an existing LVM PV
 				(code, stdout, stderr) = self.sysexec(["/sbin/pvdisplay", "/dev/sdb"])
 
-				# If the exist code is non-zero, assume that it does not exist
+				# If the exist code is non-zero, assume that it does not exist, and go
+				# ahead and create it. Any of this failing is fatal otherwise Puppet could
+				# end up putting things in the wrong disk when it does it's Puppet run
 				if code != 0:
 					# We need to create a n LVM physical volume
 					self.add_msg("Disks: No LVM PV found, creating PV")
 					(code, stdout, stderr) = self.sysexec(["/sbin/pvcreate", "-y", "/dev/sdb"])
 
-					if code == 0:
-						# pvcreate succeeded, create a volume group
-						self.add_msg("Disks: Physical volume created. Creating volume group")
-						(code, stdout, stderr) = self.sysexec(["/sbin/vgcreate", "-y", "datavg", "/dev/sdb"])
+					if code != 0:
+						self.fatal("Failed to create LVM physical volume on /dev/sdb: \n" + stdout + "\n" + stderr)
+						return
 
-						if code == 0:
-							self.add_msg("Disks: Volume group created. Creating logical volume")
-							(code, stdout, stderr) = self.sysexec(["/sbin/lvcreate", "-y", "-l100%FREE", "-n", "data", "datavg"])
+					# pvcreate succeeded, create a volume group
+					self.add_msg("Disks: Physical volume created. Creating volume group")
+					(code, stdout, stderr) = self.sysexec(["/sbin/vgcreate", "-y", "datavg", "/dev/sdb"])
 
-							if code == 0:
-								self.add_msg("Disks: Logical volume creation complete")
-							else:
-								self.add_msg("WARNING: Failed to create LVM logical volume")
-								self.add_msg(stdout)
-								self.add_msg(stderr)
-								self.warnings = self.warnings + 1
-						else:
-							self.add_msg("WARNING: Failed to create LVM volume group on /dev/sdb")
-							self.add_msg(stdout)
-							self.add_msg(stderr)
-							self.warnings = self.warnings + 1
-					else:
-						self.add_msg("WARNING: Failed to create LVM PV on /dev/sdb")
-						self.add_msg(stdout)
-						self.add_msg(stderr)
-						self.warnings = self.warnings + 1
+					if code != 0:
+						self.fatal("Failed to create LVM logical volume: \n" + stdout + "\n" + stderr)
+						return
+
+					# vgcreate succeeded, create a logical volume
+					self.add_msg("Disks: Volume group created. Creating logical volume")
+					(code, stdout, stderr) = self.sysexec(["/sbin/lvcreate", "-y", "-l100%FREE", "-n", "data", "datavg"])
+
+					if code != 0:
+						self.fatal("Failed to create new logical volume: \n" + stdout + "\n" + stderr)
+						return
+
+					# lvcreate succeeded, create an XFS or EXT4 filesystem depending on the OS
+					self.add_msg("Disks: Logical volume creation complete. Creating filesystem")
+					if self.release == 6:
+						(code, stdout, stderr) = self.sysexec(["/sbin/mkfs.ext4", "-L", "data", "/dev/mapper/datavg-data"])
+					elif self.release == 7:
+						(code, stdout, stderr) = self.sysexec(["/sbin/mkfs.xfs", "-L", "data", "/dev/mapper/datavg-data"])
+
+					if code != 0:
+						self.fatal("Failed to create filesystem on new logical volume: \n" + stdout + "\n" + stderr)
+						return
+
+					# Filesystem created, update fstab
+					self.add_msg("Disks: Filesystem created. Updating fstab")
+					try:
+						with open('/etc/fstab', 'a') as fp:
+							if self.release == 6:
+								fp.write("\nLABEL=data  /srv                   xfs     defaults        0 0")
+							elif self.release == 7:
+								fp.write("\nLABEL=data  /srv                   xfs     defaults        0 0")
+					except Exception as e:
+						self.fatal("Failed to update fstab: \n" + str(e))
+						return
+
+					# fstab updated, create symlink from /data -> /srv
+					self.add_msg("Disks: Symlinking /data to /srv")
+					try:
+						os.symlink('/srv', '/data')
+					except Exception as e:
+						self.fatal("Failed to create symlink: \n" + str(e))
+						return
+
+					# Symlink created. Mount the new filesystem
+					self.add_msg("Disks: Mounting created /srv filesystem")
+					(code, stdout, stderr) = self.sysexec(["/bin/mount", "/srv"])
+					
+					if code != 0:
+						self.fatal("Failed to mount /srv filesystem: \n" + stdout + "\n" + stderr)
+						return
 				else:
-					self.add_msg("WARNING: LVM Physical Volume already exists on /dev/sdb - skipping")
-					self.warnings = self.warnings + 1
-			else:
-				self.add_msg("Disks: No second disk detected at /dev/sdb - skipping")
+					self.add_msg("Disks: No second disk detected at /dev/sdb - skipping")
 
 
 		## 8. PUPPET PREP ######################################################
