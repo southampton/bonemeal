@@ -1017,14 +1017,6 @@ nameserver 152.78.111.113
 						self.fatal("Failed to update fstab: \n" + str(e))
 						return
 
-					# fstab updated, create symlink from /data -> /srv
-					self.add_msg("Disks: Symlinking /data to /srv")
-					try:
-						os.symlink('/srv', '/data')
-					except Exception as e:
-						self.fatal("Failed to create symlink: \n" + str(e))
-						return
-
 					# Symlink created. Mount the new filesystem
 					self.add_msg("Disks: Mounting created /srv filesystem")
 					(code, stdout, stderr) = self.sysexec(["/bin/mount", "/srv"])
@@ -1035,6 +1027,15 @@ nameserver 152.78.111.113
 				else:
 					self.add_msg("Disks: No second disk detected at /dev/sdb - skipping")
 
+		# fstab updated, create symlink from /data -> /srv (we do this
+		# regardless of whether a second disk exists or coming from a
+		# template)
+		self.add_msg("Disks: Symlinking /data to /srv")
+		try:
+			os.symlink('/srv', '/data')
+		except Exception as e:
+			self.fatal("Failed to create symlink: \n" + str(e))
+			return
 
 		## 8. PUPPET PREP ######################################################
 
