@@ -1,0 +1,1077 @@
+#!/usr/bin/python
+
+CONFIG_FILE = '/etc/bonemeal.conf'
+
+## DO NOT EDIT BELOW THIS LINE #################################################
+
+import urwid      # the text-mode UI toolkit bonemeal uses
+import platform   # for get hostname and configure
+import os         # for get network interfaces
+import os.path    # for install section
+import socket     # for get ip from hostname
+import subprocess # for sysexec
+import requests   # for auth/register
+import logging    # for logging during installation
+import time       # for pausing at startup to avoid nasty boot messages
+from netaddr import IPAddress, IPNetwork # for network configuration
+import ConfigParser # for config
+import traceback   # for exception handling
+import sys
+import termios
+import dmidecode
+import shutil
+
+class Bonemeal:
+	version       = 'DEV'
+
+	# [bonemeal]
+	config = {
+		'title'         : 'Linux Desktop 7 Setup',
+		'log_file'      : '/var/log/bonemeal.log',
+		'puppet_binary' : '/opt/puppetlabs/bin/puppet',
+		'server_url'    : 'http://localhost:8000/',
+		'server_verify' : False,
+	}
+
+	## colour setup
+	palette = [
+		('edit', 'black', 'light gray'),
+		('header', 'white', 'dark red', 'bold'),
+		('label', 'white', 'dark blue', 'bold'),
+		('bg', 'white', 'dark blue'),
+		('error', 'yellow', 'dark blue')
+		]
+
+	## state handling for unhandled input
+	start   = True
+	finish  = False
+
+################################################################################
+
+	def __init__(self):
+		print "[bonemeal] Launching installer..."
+
+		# load configuration from file
+		configParser = ConfigParser.RawConfigParser()
+
+		try:
+			configParser.readfp(open(CONFIG_FILE))
+
+			# try to load config options if they exist - overwriting defaults
+			for key in self.config.keys():
+				if configParser.has_option('bonemeal',key):
+					self.config[key] = configParser.get('bonemeal',key)
+
+			# load booleans in as a boolean if it is 'no', 'yes', 'True' or 'False'
+			try:
+				self.config['sslverify'] = configParser.getboolean('bonemeal','sslverify')
+			except ValueError as ex:
+				pass
+			except ConfigParser.NoOptionError as ex:
+				pass
+
+		except Exception as ex:
+			print "[bonemeal] Could not read from config file " + CONFIG_FILE + ": " + str(ex)
+			print "[bonemeal] Starting with default options"
+
+		# logging
+		self.log    = logging.getLogger("bonemeal")
+		fileHandler = logging.FileHandler(self.config['log_file'])
+		fileHandler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s: %(message)s'))
+		self.log.addHandler(fileHandler)
+		self.log.setLevel(logging.INFO)
+
+		## log the startup
+		self.log.info("bonemeal installer (version " + self.version + ") starting")
+
+		## detect the OS
+		if not self.supported_os():
+			raise Exception("Operating system not supported")
+
+		## Set a nice header/footer on all views
+		self.setup_header_footer()
+
+		# make tab work like down arrow...sort of.
+		urwid.command_map['tab'] = 'cursor down'
+
+		## Create the main loop
+		self.loop = urwid.MainLoop(self.view_interactive(), self.palette, unhandled_input=self.unhandled_input, handle_mouse=False)
+
+		## Run the event loop
+		self.loop.run()
+
+################################################################################
+
+	def fatal(self,message):
+		self.log.critical("fatal error: " + message)
+		self.view_fatal_error(message)
+
+################################################################################
+
+	def switch_view(self,view):
+		self.loop.widget = view
+		self.loop.draw_screen()
+
+################################################################################
+
+	def setup_header_footer(self):
+		self.header_text = urwid.Text(" " + self.config['title'])
+		self.header      = urwid.AttrWrap(self.header_text, 'header')
+		self.footer_text = urwid.Text("bonemeal installer " + self.version)
+		self.footer      = urwid.AttrWrap(self.footer_text, 'header')
+
+################################################################################
+
+	def unhandled_input(self,key):
+
+		if key == 'Q':
+			## always quit on Shift+Q
+			self.handle_exit()
+
+		elif self.finish:
+			## any input on the finish screen should quit the installer
+			self.exit_installer()
+
+		elif self.start:
+			## start screen - jump to the first input
+			self.start = False
+			self.view_sethostname()
+
+################################################################################
+
+	def sysexec(self,command,shell=False):
+		self.log.info("executing command: " + str(command))
+
+		try:
+			proc = subprocess.Popen(command,stdout=subprocess.PIPE, stderr=subprocess.STDOUT,shell=shell)
+			(stdoutdata, stderrdata) = proc.communicate()
+			return (proc.returncode,str(stdoutdata),str(stderrdata))
+		except Exception as ex:
+			self.log.error("command generated an exception: " + type(ex).__name__ + ": " + str(ex))
+			return (1,"",str(ex))
+
+################################################################################
+
+	def handle_exit(self,button=None):
+		raise urwid.ExitMainLoop()
+
+################################################################################
+## INTERACTIVE MODE
+
+	def view_interactive(self):
+		div   = urwid.Divider()
+		bt    = urwid.BigText('I am ready to build', font=urwid.font.HalfBlock5x4Font())
+		btwp  = urwid.Padding(bt, "center", 'clip')
+		txt   = urwid.Text(u"Press any key to set up your new computer",align='center')
+
+		pile1 = urwid.Pile([btwp,div,txt])
+		pile1 = urwid.Filler(pile1, 'middle', None, 7)
+		frame = urwid.Frame(header=self.header, body=pile1, footer=self.footer)
+
+		return urwid.AttrMap(frame, 'bg')
+
+################################################################################
+## SET HOSTNAME
+
+	def view_sethostname(self):
+
+		## Try to get the UOS name
+		try:		
+			self.asset_tag = dmidecode.chassis().values()[0]['data']['Asset Tag']
+		except Exception as ex:
+			self.asset_tag = None
+
+		div = urwid.Divider()
+		htxt = urwid.Text(u"Please enter the name of the computer. Use can use the arrow keys to move between fields.",align='left')
+
+		self.hostname_edit = urwid.Edit( caption=('label'," Name:  "))
+		ed = urwid.AttrMap(self.hostname_edit, 'edit')
+
+		if self.asset_tag:
+			pos = len(self.asset_tag)
+			self.hostname_edit.set_edit_text(self.asset_tag)
+			self.hostname_edit.set_edit_pos(pos)
+
+		button = urwid.Button("Continue")
+		urwid.connect_signal(button, 'click', self.handle_hostname)
+		button = urwid.Padding(button,"center", width=12)
+
+		self.hostname_error = urwid.Text(u"",align='left')
+		err = urwid.AttrMap(self.hostname_error, 'error')
+
+		pile = urwid.Pile([div,htxt,div,ed,div,button,div,err])
+		pile = urwid.Padding(pile, "left", left=1,right=1)
+		fill = urwid.Filler(pile, 'top')
+		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
+		self.switch_view(urwid.AttrMap(frame, 'bg'))
+
+################################################################################
+
+	def handle_hostname(self,button):
+		self.hostname = self.hostname_edit.get_edit_text().lower()
+
+		if self.hostname.endswith(".soton.ac.uk"):
+			self.log.info("stripping .soton.ac.uk from given hostname")
+			self.hostname = self.hostname = self.hostname[:-len(".soton.ac.uk")]
+
+		if "." in self.hostname:
+			self.hostname_error.set_text("That hostname is invalid. Please try again.")
+			return
+
+		self.log.info("chosen hostname: " + self.hostname)
+
+		# Strip off the domain
+		self.fqdn = self.hostname + ".soton.ac.uk"
+
+		self.log.info("chosen fqdn: " + self.fqdn)
+
+		self.footer_text.set_text(self.fqdn)
+		self.view_auth()
+
+################################################################################
+
+	def view_auth(self):
+
+		div = urwid.Divider()
+
+		mtxt = urwid.Text(u"Please enter your University username and password in order to register this system.",align='left')
+
+		self.username = urwid.Edit(caption=('label'," Username:  "),allow_tab=False)
+		edituser = urwid.AttrMap(self.username, 'edit')
+		self.password = urwid.Edit(caption=('label'," Password:  "),mask="*")
+		editpass = urwid.AttrMap(self.password, 'edit')
+
+		button1 = urwid.Button("Continue")
+		urwid.connect_signal(button1, 'click', self.handle_auth)
+		button1 = urwid.Padding(button1,"center", width=12)
+
+		self.auth_error = urwid.Text(u"",align='left')
+		err = urwid.AttrMap(self.auth_error, 'error')
+
+		pile = urwid.Pile([div,mtxt,div,edituser,div,editpass,div,button1,div,err])
+		pile = urwid.Padding(pile, "left", left=1,right=1)
+		fill = urwid.Filler(pile, 'top')
+
+		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
+		self.switch_view(urwid.AttrMap(frame, 'bg'))
+
+################################################################################
+
+	def handle_auth(self,button):
+		self.auth_error.set_text("Contacting server, please wait...")
+		self.loop.draw_screen()
+
+		## python requests call with SSL...
+		try:
+			payload = {'ident': self.ident, 'hostname': self.hostname, 'username': self.username.get_edit_text(), 'password': self.password.get_edit_text()}
+			r = requests.post(self.config['server_url'] + "api/register", data=payload, verify = self.config['server_verify'])
+		except Exception as ex:
+			self.log.error("error contacting registration server: " + type(ex).__name__ + ": " + str(ex))
+			self.auth_error.set_text("Error contacting registration server: " + type(ex).__name__ + ": " + str(ex))
+			return
+
+		if r.status_code == 200:
+			try:
+				self.json = r.json()
+
+				if 'error' in self.json:
+					self.log.error("registration server returned an error: " + self.json['reason'])
+					self.auth_error.set_text(self.json['reason'])
+				else:
+					self.log.error("registration server IS HAPPY")
+					self.auth_error.set_text("fuck yeah: \n" + self.json['private_key'] + "\n" + "\n" + self.json['public_key'])
+
+			except Exception as ex:
+				self.log.error("failed to parse response from registration server: " + type(ex).__name__ + ": " + str(ex))
+				self.auth_error.set_text("Failed to understand return response: " + type(ex).__name__ + ": " + str(ex))
+				return
+
+		else:
+			self.log.error("unexpected return code from registration server: " + str(r.status_code))
+			self.auth_error.set_text("Registration failed: The server returned a HTTP Error " + str(r.status_code))
+
+################################################################################
+## DO INSTALL "GO"
+
+	def view_go(self):
+		div = urwid.Divider()
+
+		self.msgs = urwid.SimpleFocusListWalker([urwid.Text(" ",align='left'),urwid.Text(" Init: Starting post-install",align='left')])
+		self.msgs_box = urwid.ListBox(self.msgs)
+
+		frame = urwid.Frame(header=self.header, body=self.msgs_box, footer=self.footer)
+		self.switch_view(urwid.AttrMap(frame, 'bg'))
+
+		## now do the install
+		self.configure()
+
+################################################################################
+
+	def add_msg(self,message):
+		self.log.info(message)
+		self.msgs.append(urwid.Text(" " + message.rstrip(),align='left'))
+		self.msgs_box.set_focus(len(self.msgs) -1)
+		self.loop.draw_screen()
+
+################################################################################
+
+	def configure(self, loop=None, user_data=None):
+		self.warnings = 0
+
+		if self.fromTemplate:
+			## We need to authenticate with hostname and VM UUID to get 
+			## puppet certs and rhn activation keys
+
+			## Get the system UUID which is the VMWare UUID which acts as the 'password'
+			try:
+				# this is not...a very good way to getting the UUID. It works on current VMs but might not work in future.
+				# really it should be parsing the values and checking dmi_types and such. oh well...
+				self.vmuuid = dmidecode.system().values()[1]['data']['UUID']
+			except Exception as ex:
+				self.fatal("Could not read system UUID\n" + type(ex).__name__ + ": " + type(ex).__name__ + ": " + str(ex))
+				return
+
+			self.add_msg("Cortex: Detected system UUID as " + self.vmuuid)
+
+			## register using vm uuid (rather than username/password)
+			self.add_msg("Cortex: Authenticating to cortex server with system UUID")
+			
+			try:
+				payload = {'ident': self.ident, 'uuid': self.vmuuid}
+				r = requests.post(self.config['cortex_url'] + "api/register", data=payload, verify = self.config['cortex_verify'])
+			except Exception as ex:
+				self.fatal("An error occured when attempting to contact cortex: \n" + type(ex).__name__ + ": " + type(ex).__name__ + ": " + str(ex))
+				return
+
+			if r.status_code == 200:
+				try:
+					self.add_msg("Cortex: Successful response from cortex server")
+					self.json = r.json()
+
+					## Puppet bits
+					self.puppet_private_key = self.json['private_key']
+					self.puppet_public_key  = self.json['public_key']
+					self.puppet_cert        = self.json['cert']
+
+					## Activation key for Satellite
+					self.sat_activation_key = self.json['satellite_activation_key']
+
+					## The hostname and IP address
+					self.hostname = self.json['hostname']
+					self.fqdn     = self.json['fqdn']
+					self.ipaddr   = self.json['ipaddress']
+
+				except Exception as ex:
+					self.fatal("Could not parse return response from cortex: " + type(ex).__name__ + ": " + type(ex).__name__ + ": " + str(ex))
+					return
+
+			elif r.status_code == 403:
+				self.fatal("Cortex rejected our registration request (UUID not found)")
+				return
+			else:
+				self.fatal("Unexpected response code from cortex: HTTP " + str(r.status_code))
+				return
+
+			## Log what we got told for name/fqdn
+			self.add_msg("Cortex: Hostname will be set to: " + self.hostname)
+			self.add_msg("Cortex: FQDN will be set to: " + self.fqdn)
+
+			# Determine what network interface to use
+			## Always use the first network interface except lo (its always going to be eth0 on vmware, but just to be sure...)
+
+			try:
+				interfaces = self.get_network_interfaces()
+			except OSError as ex:
+				self.fatal("Could not obtain the list of local network interfaces: " + str(e))
+				return
+
+			if interfaces == None:
+				self.fatal("Could not obtain the list of local network interfaces: " + str(e))
+				return
+
+			self.netif = interfaces[0]
+			self.add_msg("Cortex: Chosen network interface is: " + self.netif)
+
+			## Now process the given ip address
+			if 'dhcp' in self.ipaddr.lower():
+				self.dhcp = True
+				self.add_msg("Cortex: Networking set to DHCP")
+			else:
+				self.dhcp = False
+
+				try:
+					self.process_ipaddr(self.ipaddr)
+				except ValueError:
+					self.fatal("The IP address set by cortex is invalid: " + str(self.ipaddr))
+					return
+				except LookupError:
+					self.fatal("The IP address set by cortex is not within a known network: " + str(self.ipaddr))
+					return
+
+
+				self.add_msg("Cortex: IP Address will be set to: " + str(self.ipaddr))
+				self.add_msg("Cortex: Netmask will be set to: "    + str(self.netmask))
+				self.add_msg("Cortex: Router will be set to: "     + str(self.router))
+
+		## 1. HOSTNAME #########################################################
+
+		## RHEL7 hostname
+		if self.release == 7:
+			(code, stdout, stderr) = self.sysexec(["/bin/hostnamectl","set-hostname",self.hostname])
+
+			if code != 0:
+				self.fatal("Network: Setting hostname failed: \n" + stdout + "\n" + stderr)
+				return
+			else:
+				self.add_msg("Network: Hostname set to '" + self.hostname + "'")
+
+		## RHEL6 hostname
+		elif self.release == 6:
+			network_config_file = "/etc/sysconfig/network"
+			self.add_msg("Network: Reading global configuration (" + network_config_file + ")")
+
+			if os.path.isfile(network_config_file): 
+				try:
+					with open(network_config_file, "r") as netcfg_file:
+						netcfg = netcfg_file.readlines()
+				except Exception as e:
+					self.add_msg("WARNING: could not read the system network config file " + network_config_file)
+					self.add_msg("WARNING: Because I can't read the existing config file the system configuration might not work")
+					self.add_msg(str(e))
+					netcfg = []
+					self.warnings = self.warnings + 1
+			else:
+				self.add_msg("WARNING: There is no system network config file on this system!")
+				self.add_msg("WARNING: Because I can't read the existing config file the system configuration might not work")
+				netcfg = []
+				self.warnings = self.warnings + 1
+
+			found_hostname = False
+			for i, line in enumerate(netcfg):
+				if line.startswith('HOSTNAME'):
+					found_hostname = True
+					netcfg[i] = "HOSTNAME=" + self.hostname + "\n"
+
+			if not found_hostname:
+				netcfg.append("HOSTNAME=" + self.hostname + "\n")
+
+			## RHEL6 doesn't send the hostname via DHCP by default because: reasons.
+			netcfg.append("DHCP_HOSTNAME=" + self.hostname + "\n")
+
+			self.add_msg("Network: Saving new global configuration with updated hostname")
+			try:
+				with open(network_config_file, "w") as fp:
+					for line in netcfg:
+						fp.write(line)
+				self.add_msg("Network: Saved new global configuration")
+			except Exception as e:
+				self.fatal("Could not write to system network config file " + network_config_file + ":\n" + type(ex).__name__ + ": " + str(ex))
+				return
+
+			## Set hostname live now as well 
+			self.add_msg("Network: Setting runtime hostname")
+			(code, stdout, stderr) = self.sysexec(["/bin/hostname",self.hostname])
+
+			if code != 0:
+				self.fatal("Could not set runtime hostname: \n" + stdout + "\n" + stderr)
+				return
+
+		## 2. FQDN #############################################################
+
+		## set fqdn if not using dhcp
+		if not self.dhcp:
+			try:
+				with open("/etc/hosts", "a") as hosts_file:
+					hosts_file.write(self.ipaddr + "\t" + self.fqdn + "\t" + self.hostname)
+			except Exception as e:
+				self.add_msg("WARNING: could not set fqdn in /etc/hosts:")
+				self.add_msg(str(e))
+				self.warnings = self.warnings + 1
+
+		## dhcp hosts file is set via puppet on each ip address change - we dont need to do it
+
+		## 3. NETWORK ##########################################################
+
+		## turn off network manager
+		if not self.fromTemplate:
+			if self.release == 7:
+				self.add_msg("Network: Stopping NetworkManager")
+				(code, stdout, stderr) = self.sysexec(["/bin/systemctl","stop","NetworkManager"])
+
+				if code != 0:
+					self.fatal("Could not stop the NetworkManager service: \n" + stdout + "\n" + stderr)
+					return
+
+			elif self.release == 6:
+				if os.path.exists("/etc/init.d/NetworkManager"):
+					self.add_msg("Network: Stopping NetworkManager")
+					(code, stdout, stderr) = self.sysexec(["/sbin/service","NetworkManager","stop"])
+
+					if code != 0:
+						self.fatal("Could not stop the NetworkManager service: \n" + stdout + "\n" + stderr)
+						return
+
+		## check the config file exists (it should...)
+		self.add_msg("Network: Reading interface configuration")
+		network_config_file = "/etc/sysconfig/network-scripts/ifcfg-" + self.netif
+		if os.path.isfile(network_config_file):
+			try:
+				with open(network_config_file, "r") as netcfg_file:
+					netcfg = netcfg_file.readlines()
+			except Exception as e:
+				self.add_msg("WARNING: could not read network config file " + network_config_file)
+				self.add_msg("WARNING: Because I can't read the existing config file the network interface is unlikely to work")
+				self.add_msg(str(e))
+				netcfg = []
+				self.warnings = self.warnings + 1
+		else:
+			self.add_msg("WARNING: No existing network configuration file found for interface " + self.netif)
+			self.add_msg("WARNING: Because there is no existing config file the network interface is unlikely to work")
+			netcfg = []
+			self.warnings = self.warnings + 1
+
+		self.add_msg("Network: Generating new interface configuration")
+
+		## remove parts of the existing file we dont want
+		netcfg = [x for x in netcfg if self.netcfg_remove(x)]
+
+		## now add in what we want
+		netcfg.append("PEERDNS=no\n")
+
+		if self.dhcp:
+			netcfg.append("BOOTPROTO=dhcp\n")
+		else:
+			netcfg.append("BOOTPROTO=static\n")
+			netcfg.append("IPADDR=" + self.ipaddr + "\n")
+			netcfg.append("NETMASK=" + str(self.netmask) + "\n")
+			netcfg.append("GATEWAY=" + self.router + "\n")
+
+		if self.release == 6:
+			netcfg.append("NM_CONTROLLED=no\n")
+
+		## now write out the file
+		self.add_msg("Network: Saving new interface configuration")
+		try:
+			with open(network_config_file, "w") as fp:
+				for line in netcfg:
+					fp.write(line)
+			self.add_msg("Network: Saved new interface configuration")
+		except Exception as e:
+			self.fatal("Could not write to network config file " + network_config_file + ":\n" + type(ex).__name__ + ": " + str(ex))
+			return
+
+		## restart the network interface using ifdown/ifup
+		self.add_msg("Network: Stopping interface " + self.netif)
+		(code, stdout, stderr) = self.sysexec(["/sbin/ifdown",self.netif])
+
+		if code != 0:
+			self.fatal("Could not stop network interface " + self.netif + ": \n" + stdout + "\n" + stderr)
+			return
+
+		self.add_msg("Network: Starting interface " + self.netif)
+		(code, stdout, stderr) = self.sysexec(["/sbin/ifup",self.netif])
+
+		if code != 0:
+			self.fatal("Could not start network interface " + self.netif + ": \n" + stdout + "\n" + stderr)
+			return
+		else:
+			self.add_msg("Network: Started interface " + self.netif)
+
+		## because we set PEERDNS=no in the network settings the system has no idea, even with dhcp, what dns servers to use.
+		## puppet will set them later, but we still need dns servers before that (for talking to satellite/puppet/etc), so we'll write out a sample
+		## resolv.conf to bootstrap us to the puppet stage.
+		## we set PEERDNS=no because puppet manages resolv.conf normally and we dont want the network and puppet fighting over the resolv.conf file.
+		self.log.info("Network: Setting DNS Servers")
+		try:
+			with open("/etc/resolv.conf", "w") as fp:
+				fp.write("""search soton.ac.uk
+nameserver 152.78.110.110
+nameserver 152.78.111.81
+nameserver 152.78.111.113
+""")
+		except Exception as ex:
+			self.fatal("Could not write to /etc/resolv.conf:\n" + type(ex).__name__ + ": " + str(ex))
+			return
+
+		## 4. RED HAT SATELLITE ################################################
+
+		if self.config['satellite6']:
+
+			## SATELLITE 6
+
+			## satellite cert rpm will already be installed in the template
+			if not self.fromTemplate:
+				self.add_msg("Satellite: Installing certificate RPM")
+				(code, stdout, stderr) = self.sysexec(["rpm","-ivh",self.config['satellite_rpm']])
+
+				if code != 0:
+					self.add_msg("WARNING: could not install certificate RPM for satellite:")
+					self.add_msg(stdout)
+					self.add_msg(stderr)
+					self.warnings = self.warnings + 1
+
+			self.add_msg("Satellite: Registering with Katello")
+			(code, stdout, stderr) = self.sysexec('/usr/sbin/subscription-manager register --org="University_of_Southampton" --activationkey="' + self.sat_activation_key + '"',shell=True) 
+
+			if code != 0:
+				self.fatal("Satellite: Could not register with katello: \n" + stdout + "\n" + stderr)
+				return
+			else:
+				self.add_msg("Satellite: Katello registration successful")
+
+			## katello-agent rpm will already be installed in the template
+			if not self.fromTemplate:
+				self.add_msg("Satellite: Installing katello-agent")
+				(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install katello-agent",shell=True)
+
+				if code != 0:
+					self.fatal("Satellite: Could not install katello-agent: \n" + stdout + "\n" + stderr)
+					return
+				else:
+					self.add_msg("Satellite: Installed katello-agent")
+
+		else:
+
+			## SATELLITE 5
+
+			self.add_msg("Satellite: Downloading rhn-org-trusted-ssl-cert")
+
+			(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/tmp/rhn-org-trusted-ssl-cert.rpm",self.config['satellite_rpm'],"--no-check-certificate"])
+
+			if code != 0:
+				self.fatal("Could not download up2date config file: \n" + stdout + "\n" + stderr)
+				return
+
+			## See if the rpm is already installed
+			(code, stdout, stderr) = self.sysexec(["/bin/rpm","-qi","rhn-org-trusted-ssl-cert"])
+
+			if code == 0:
+				self.add_msg("Satellite: rhn-org-trusted-ssl-cert is already installed")
+			else:
+				self.add_msg("Satellite: Installing rhn-org-trusted-ssl-cert")
+
+				(code, stdout, stderr) = self.sysexec(["/bin/rpm","-Uvh","/tmp/rhn-org-trusted-ssl-cert.rpm"])
+
+				if code != 0:
+					self.fatal("Could not install satellite SSL certificate RPM: \n" + stdout + "\n" + stderr)
+					return
+
+				self.add_msg("Satellite: Installed rhn-org-trusted-ssl-cert")
+
+			self.add_msg("Satellite: Installing up2date config file")
+
+			(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/sysconfig/rhn/up2date","https://rhn.soton.ac.uk/pub/up2date","--no-check-certificate"])
+
+			if code != 0:
+				self.fatal("Could not download up2date config file: \n" + stdout + "\n" + stderr)
+				return
+
+			self.add_msg("Satellite: Installed up2date config file")
+			self.add_msg("Satellite: Registering with rhnregks")
+
+			(code, stdout, stderr) = self.sysexec('/usr/sbin/rhnreg_ks --force --activationkey="' + self.sat_activation_key + '"',shell=True) 
+
+			if code != 0:
+				self.fatal("Could not register with Red Hat Satellite: \n" + stdout + "\n" + stderr)
+				return
+			else:
+				self.add_msg("Satellite: Registration successful")
+
+			## 5. RPM GPG KEYS #####################################################
+
+			## iSolutions GPG Key
+			(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/pki/rpm-gpg/ISOLUTIONS-PUBLIC-KEY","https://rhn.soton.ac.uk/pub/ISOLUTIONS-PUBLIC-KEY","--no-check-certificate"])
+
+			if code != 0:
+				self.fatal("Could not download the iSolutions RPM GPG key: \n" + stdout + "\n" + stderr)
+				return
+
+			(code, stdout, stderr) = self.sysexec(["/bin/rpm","--import","/etc/pki/rpm-gpg/ISOLUTIONS-PUBLIC-KEY"])
+
+			if code != 0:
+				self.fatal("Could not import the iSolutions RPM GPG key: \n" + stdout + "\n" + stderr)
+				return
+
+			if self.release == 7:
+				epel_key = "https://rhn.soton.ac.uk/pub/RPM-GPG-KEY-EPEL-7"
+			elif self.release == 6:
+				epel_key = "https://rhn.soton.ac.uk/pub/RPM-GPG-KEY-EPEL"
+
+			## EPEL GPG Key
+			(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL",epel_key,"--no-check-certificate"])
+
+			if code != 0:
+				self.fatal("Could not download the EPEL RPM GPG key: \n" + stdout + "\n" + stderr)
+				return
+
+			(code, stdout, stderr) = self.sysexec(["/bin/rpm","--import","/etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL"])
+
+			if code != 0:
+				self.fatal("Could not import the EPEL RPM GPG key: \n" + stdout + "\n" + stderr)
+				return
+
+			## PuppetLabs Yum Repository GPG Key
+			(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/pki/rpm-gpg/RPM-GPG-KEY-PUPPET-COLLECTIONS","https://rhn.soton.ac.uk/pub/RPM-GPG-KEY-PUPPET-COLLECTIONS","--no-check-certificate"])
+
+			if code != 0:
+				self.fatal("Could not download the Puppet RPM GPG key: \n" + stdout + "\n" + stderr)
+				return
+
+			(code, stdout, stderr) = self.sysexec(["/bin/rpm","--import","/etc/pki/rpm-gpg/RPM-GPG-KEY-PUPPET-COLLECTIONS"])
+
+			if code != 0:
+				self.fatal("Could not import the Puppet RPM GPG key: \n" + stdout + "\n" + stderr)
+				return
+
+		## 6. YUM UPDATE #######################################################
+
+		self.add_msg("Update: Installing latest updates")
+		(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y update",shell=True)
+
+		if code != 0:
+			self.add_msg("WARNING: non-zero exit occured during yum update:")
+			self.add_msg(stdout)
+			self.add_msg(stderr)
+			self.warnings = self.warnings + 1
+
+		## 7. LVM SECOND DISK ##################################################
+
+		if self.fromTemplate:
+			# Check that a second disk exists
+			if os.path.exists('/dev/sdb'):
+				# Log
+				self.add_msg("Disks: Found a second disk, checking for LVM")
+
+				# If it exists, check for an existing LVM PV
+				(code, stdout, stderr) = self.sysexec(["/sbin/pvdisplay", "/dev/sdb"])
+
+				# If the exist code is non-zero, assume that it does not exist, and go
+				# ahead and create it. Any of this failing is fatal otherwise Puppet could
+				# end up putting things in the wrong disk when it does it's Puppet run
+				if code != 0:
+					# We need to create a n LVM physical volume
+					self.add_msg("Disks: No LVM PV found, creating PV")
+					(code, stdout, stderr) = self.sysexec(["/sbin/pvcreate", "-y", "/dev/sdb"])
+
+					if code != 0:
+						self.fatal("Failed to create LVM physical volume on /dev/sdb: \n" + stdout + "\n" + stderr)
+						return
+
+					# pvcreate succeeded, create a volume group
+					self.add_msg("Disks: Physical volume created. Creating volume group")
+					(code, stdout, stderr) = self.sysexec(["/sbin/vgcreate", "-y", "datavg", "/dev/sdb"])
+
+					if code != 0:
+						self.fatal("Failed to create LVM logical volume: \n" + stdout + "\n" + stderr)
+						return
+
+					# vgcreate succeeded, create a logical volume
+					self.add_msg("Disks: Volume group created. Creating logical volume")
+					(code, stdout, stderr) = self.sysexec(["/sbin/lvcreate", "-y", "-l100%FREE", "-n", "data", "datavg"])
+
+					if code != 0:
+						self.fatal("Failed to create new logical volume: \n" + stdout + "\n" + stderr)
+						return
+
+					# lvcreate succeeded, create an XFS or EXT4 filesystem depending on the OS
+					self.add_msg("Disks: Logical volume creation complete. Creating filesystem")
+					if self.release == 6:
+						(code, stdout, stderr) = self.sysexec(["/sbin/mkfs.ext4", "-L", "data", "/dev/mapper/datavg-data"])
+					elif self.release == 7:
+						(code, stdout, stderr) = self.sysexec(["/sbin/mkfs.xfs", "-L", "data", "/dev/mapper/datavg-data"])
+
+					if code != 0:
+						self.fatal("Failed to create filesystem on new logical volume: \n" + stdout + "\n" + stderr)
+						return
+
+					# Filesystem created, update fstab. Note that the newline at the end of the 
+					# fstab append is required (at least in RHEL6, RHEL7 was less irritated by it)
+					self.add_msg("Disks: Filesystem created. Updating fstab")
+					try:
+						with open('/etc/fstab', 'a') as fp:
+							if self.release == 6:
+								fp.write("\nLABEL=data          /srv           ext4    defaults        0 0\n")
+							elif self.release == 7:
+								fp.write("\nLABEL=data          /srv           xfs     defaults        0 0\n")
+					except Exception as e:
+						self.fatal("Failed to update fstab: \n" + str(e))
+						return
+
+					# fstab updated, create symlink from /data -> /srv
+					self.add_msg("Disks: Symlinking /data to /srv")
+					try:
+						os.symlink('/srv', '/data')
+					except Exception as e:
+						self.fatal("Failed to create symlink: \n" + str(e))
+						return
+
+					# Symlink created. Mount the new filesystem
+					self.add_msg("Disks: Mounting created /srv filesystem")
+					(code, stdout, stderr) = self.sysexec(["/bin/mount", "/srv"])
+					
+					if code != 0:
+						self.fatal("Failed to mount /srv filesystem: \n" + stdout + "\n" + stderr)
+						return
+				else:
+					self.add_msg("Disks: No second disk detected at /dev/sdb - skipping")
+
+
+		## 8. PUPPET PREP ######################################################
+
+		## If we are installing from a template then we need to stop puppet running before
+		## messing with it. Puppet won't be working anyway at the moment because tprep
+		## will have wiped its certificates.
+
+		## templates will have puppet running, we want to stop that before we mess with puppet.
+		if self.fromTemplate:
+			if self.release == 7:
+				self.add_msg("Puppet: Stopping agent")
+				(code, stdout, stderr) = self.sysexec(["/bin/systemctl","stop","puppet"])
+
+				if code != 0:
+					self.fatal("Could not stop the Puppet agent service: \n" + stdout + "\n" + stderr)
+					return
+
+			elif self.release == 6:
+				self.add_msg("Puppet: Stopping agent")
+				(code, stdout, stderr) = self.sysexec(["/sbin/service","puppet","stop"])
+
+				if code != 0:
+					self.fatal("Could not stop the Puppet agent service: \n" + stdout + "\n" + stderr)
+					return
+
+		# a dependency on our use of puppet is lsb based facter variables
+		# so we install it first.
+		# this will already be installed in the template
+		if not self.fromTemplate:
+			self.add_msg("Puppet: Installing redhat-lsb-core package")
+			(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install redhat-lsb-core",shell=True)
+
+			if code != 0:
+				self.fatal("Could not install redhat-lsb-core: \n" + stdout + "\n" + stderr)
+				return
+
+		## If puppet was set to skip, then quit here.
+		if self.config['skip_puppet'] and not self.fromTemplate:
+			self.view_finish()
+			return
+
+		## INSTALL PUPPET
+		# this will already be installed in the template
+		if not self.fromTemplate:
+			self.add_msg("Puppet: Installing puppet-agent")
+			(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install puppet-agent",shell=True)
+
+			if code != 0:
+				self.fatal("Could not install Puppet: \n" + stdout + "\n" + stderr)
+				return
+
+		## SET CONFIG - server
+		self.add_msg("Puppet: Setting master server to " + self.config['puppet_master'])
+		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " config set server " + self.config['puppet_master'] + " --section agent",shell=True)
+
+		if code != 0:
+			self.fatal("Could not set puppet master: \n" + stdout + "\n" + stderr)
+			return
+
+		## SET CONFIG - certname
+		self.add_msg("Puppet: Setting certname to " + self.fqdn)
+		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " config set certname	 " + self.fqdn + " --section agent",shell=True)
+
+		if code != 0:
+			self.fatal("Could not set puppet certname: \n" + stdout + "\n" + stderr)
+			return
+
+		## Remove existing puppet SSL configuration.
+		if os.path.exists(self.config['puppet_ssldir']):
+			self.add_msg("Puppet: Removing existing SSL directory, if any")
+			try:
+				self.log.info("executing shutil.rmtree against path: " + self.config['puppet_ssldir'])
+				shutil.rmtree(self.config['puppet_ssldir'])
+			except Exception as ex:
+				self.fatal("Could not delete existing Puppet SSL directory:\n" + type(ex).__name__ + ": " + str(ex))
+				return				
+
+		self.add_msg("Puppet: Creating new SSL directory")		
+		self.sysexec(self.config['puppet_binary'] + " agent --fingerprint",shell=True)
+		## it will ALWAYS error here (yay puppet), so ignore
+
+		## Deploy certificates and set certname option in puppet.conf
+		self.add_msg("Puppet: Saving client certificate")
+		try:
+			with open(self.config['puppet_ssldir'] + "certs/" + self.fqdn + ".pem", "w") as fp:
+				fp.write(self.puppet_cert)
+
+			with open(self.config['puppet_ssldir'] + "public_keys/" + self.fqdn + ".pem", "w") as fp:
+				fp.write(self.puppet_public_key)
+
+			with open(self.config['puppet_ssldir'] + "private_keys/" + self.fqdn + ".pem", "w") as fp:
+				fp.write(self.puppet_private_key)
+		except Exception as ex:
+			self.fatal("Could not save puppet certificate files:\n" + type(ex).__name__ + ": " + str(ex))
+			return
+
+		self.add_msg("Puppet: Applying policy")
+		## we run twice just to be sure. we only care about the exit code of the second
+		self.sysexec(self.config['puppet_binary'] + " agent --test",shell=True)
+		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " agent --test",shell=True)
+
+		if code != 0 and code != 2:
+			self.fatal("Puppet reported an error when applying policy to this system: \n" + stdout + "\n" + stderr)
+			return
+
+		## Set Puppet to run all the time
+		self.add_msg("Puppet: Enabling on startup")
+		if self.release == 7:
+			(code, stdout, stderr) = self.sysexec(["/bin/systemctl","enable","puppet"])
+
+			if code != 0:
+				self.add_msg("WARNING: Failed to configure Puppet to launch on startup")
+				self.add_msg(stdout)
+				self.add_msg(stderr)
+				self.warnings = self.warnings + 1
+
+		elif self.release == 6:
+			(code, stdout, stderr) = self.sysexec(["/sbin/chkconfig","puppet","on"])
+
+			if code != 0:
+				self.add_msg("WARNING: Failed to configure Puppet to launch on startup")
+				self.add_msg(stdout)
+				self.add_msg(stderr)
+				self.warnings = self.warnings + 1
+
+		if self.fromTemplate:
+
+			## update the server to say we're done installing
+			try:
+				payload = {'uuid': self.vmuuid}
+				r = requests.post(self.config['cortex_url'] + "api/installer/notify", data=payload, verify = self.config['cortex_verify'])
+
+				if r.status_code != 200:
+					raise Exception("non-200 response from cortex")
+
+			except Exception as ex:
+				self.warnings = self.warnings + 1
+				self.add_msg("WARNING: Could not notify cortex that the installation is complete")
+
+			if self.warnings > 0:
+				self.view_finish()
+			else:
+				## automated install - so just reboot
+				self.exit_installer()
+		else:
+			## Interactive install
+			self.view_finish()
+
+################################################################################
+
+	def netcfg_remove(self,line):
+		removals = ['BOOTPROTO','DHCPCLASS','NM_CONTROLLED','IPADDR','NETMASK','GATEWAY','PEERDNS']
+
+		for bad in removals:
+			if line.startswith(bad):
+				return False
+
+		return True
+
+################################################################################
+## FINISH SCREEN
+
+	def view_finish(self):
+		self.finish = True
+
+		## clear standard input so if the user pressed buttons during the install script, clear them away
+		termios.tcflush(sys.stdin,termios.TCIOFLUSH)
+
+		div = urwid.Divider()
+		bt = urwid.BigText('all done!', font=urwid.font.HalfBlock5x4Font())
+		btwp = urwid.Padding(bt, "center", 'clip')
+
+		txt = urwid.Text(u"Press any key to restart",align='center')
+
+		if self.warnings == 0:
+			pile1 = urwid.Pile([btwp,div,txt])
+		elif self.warnings == 1:
+			warn = urwid.Text("One warning was detected during installation. \nPlease review " + self.config['log_file'] + " on reboot to check these warnings.",align='center')
+			pile1 = urwid.Pile([btwp,div,txt,div,warn])
+		else:
+			warn = urwid.Text(str(self.warnings) + u" warnings were encountered during installation.\n Please review " + self.config['log_file'] + " on reboot to check these warnings.",align='center')
+			pile1 = urwid.Pile([btwp,div,txt,div,warn])
+
+		pile1 = urwid.Filler(pile1, 'middle', None, 7)
+
+		frame = urwid.Frame(header=self.header, body=pile1, footer=self.footer)
+		self.switch_view(urwid.AttrMap(frame, 'bg'))
+
+################################################################################
+
+	def exit_installer(self):
+		## Mark bonemeal as not starting at reboot
+		os.unlink('/.bonemeal')
+
+		## Delete the template marker file too, if appropriate
+		if self.fromTemplate:
+			os.unlink('/.bonemeal_template')
+
+		## reboot
+		self.sysexec("/sbin/reboot")
+
+		## exit (We probably never get this far)
+		raise urwid.ExitMainLoop()
+
+################################################################################
+## FATAL ERROR SCREEN
+
+	def view_fatal_error(self,message):
+		## clear standard input so if the user pressed buttons during the install script, clear them away
+		termios.tcflush(sys.stdin,termios.TCIOFLUSH)
+
+		div = urwid.Divider()
+
+		bt = urwid.BigText('uh oh...', font=urwid.font.HalfBlock5x4Font())
+		btwp = urwid.Padding(bt, "center", 'clip')
+		htxt = urwid.Text(u"A fatal error occured:",align='left')
+		mtxt = urwid.Text(message,align='left')
+
+		button = urwid.Button("Exit installer")
+		urwid.connect_signal(button, 'click', self.handle_exit)
+		button = urwid.Padding(button,"center", width=18)
+
+		pile = urwid.Pile([div,btwp,div,htxt,div,mtxt,div,button])
+		pile = urwid.Padding(pile, "left", left=1,right=1)
+		fill = urwid.Filler(pile, 'top')
+		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
+		self.switch_view(urwid.AttrMap(frame, 'bg'))
+
+################################################################################
+## Detect OS version
+
+	def supported_os(self):
+
+		## work out OS version
+		(distname, distversion, distid) = platform.linux_distribution()
+
+		if distid == 'Maipo':
+			self.release = 7
+			self.ident   = 'el7s'
+			self.log.info("Detected operating system as RHEL7: " + distname + " " + distversion + " " + distid)
+			return True
+		else:
+			self.log.error("Detected operating system as: " + distname + " " + distversion + " " + distid)
+			return False
+
+################################################################################
+
+if '__main__' == __name__:
+	## plymouth should not be running or this installer won't work very well
+	subprocess.call(["/usr/bin/plymouth","quit"])
+
+	try:
+		Bonemeal()
+		subprocess.call(["reset"])
+	except Exception as ex:
+		print "--------------------------------------------------------------------------------"
+		print "A critical error occured in bonemeal! Details will be shown below for 5 minutes: \n"
+		traceback.print_exc()
+		print "--------------------------------------------------------------------------------"
+		time.sleep(300)
