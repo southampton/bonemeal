@@ -422,16 +422,6 @@ class Bonemeal:
 
 		self.view_finish()
 
-################################################################################
-
-	def netcfg_remove(self,line):
-		removals = ['BOOTPROTO','DHCPCLASS','NM_CONTROLLED','IPADDR','NETMASK','GATEWAY','PEERDNS']
-
-		for bad in removals:
-			if line.startswith(bad):
-				return False
-
-		return True
 
 ################################################################################
 ## FINISH SCREEN
