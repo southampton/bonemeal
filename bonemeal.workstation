@@ -21,6 +21,12 @@ import termios
 import dmidecode
 import shutil
 
+# ask for hostname
+# ask for username/password
+# contact registration server
+# save SSH key pair
+# rsync down the puppet modules using the ssh keypair
+
 class Bonemeal:
 	version       = 'DEV'
 
@@ -264,7 +270,7 @@ class Bonemeal:
 		## python requests call with SSL...
 		try:
 			payload = {'ident': self.ident, 'hostname': self.hostname, 'username': self.username.get_edit_text(), 'password': self.password.get_edit_text()}
-			r = requests.post(self.config['server_url'] + "api/register", data=payload, verify = self.config['server_verify'])
+			r = requests.post(self.config['server_url'] + "api/v1/register", data=payload, verify = self.config['server_verify'])
 		except Exception as ex:
 			self.log.error("error contacting registration server: " + type(ex).__name__ + ": " + str(ex))
 			self.auth_error.set_text("Error contacting registration server: " + type(ex).__name__ + ": " + str(ex))
@@ -278,8 +284,9 @@ class Bonemeal:
 					self.log.error("registration server returned an error: " + self.json['reason'])
 					self.auth_error.set_text(self.json['reason'])
 				else:
-					self.log.error("registration server IS HAPPY")
-					self.auth_error.set_text("fuck yeah: \n" + self.json['private_key'] + "\n" + "\n" + self.json['public_key'])
+					self.log.info("registration successful")
+					self.view_go()
+					#self.auth_error.set_text("yeah: \n" + self.json['private_key'] + "\n" + "\n" + self.json['public_key'])
 
 			except Exception as ex:
 				self.log.error("failed to parse response from registration server: " + type(ex).__name__ + ": " + str(ex))
@@ -291,12 +298,12 @@ class Bonemeal:
 			self.auth_error.set_text("Registration failed: The server returned a HTTP Error " + str(r.status_code))
 
 ################################################################################
-## DO INSTALL "GO"
+## DO INSTALL
 
 	def view_go(self):
 		div = urwid.Divider()
 
-		self.msgs = urwid.SimpleFocusListWalker([urwid.Text(" ",align='left'),urwid.Text(" Init: Starting post-install",align='left')])
+		self.msgs = urwid.SimpleFocusListWalker([urwid.Text(" ",align='left'),urwid.Text(" Please wait whilst I set up the computer:",align='left')])
 		self.msgs_box = urwid.ListBox(self.msgs)
 
 		frame = urwid.Frame(header=self.header, body=self.msgs_box, footer=self.footer)
@@ -318,280 +325,74 @@ class Bonemeal:
 	def configure(self, loop=None, user_data=None):
 		self.warnings = 0
 
-		if self.fromTemplate:
-			## We need to authenticate with hostname and VM UUID to get 
-			## puppet certs and rhn activation keys
-
-			## Get the system UUID which is the VMWare UUID which acts as the 'password'
-			try:
-				# this is not...a very good way to getting the UUID. It works on current VMs but might not work in future.
-				# really it should be parsing the values and checking dmi_types and such. oh well...
-				self.vmuuid = dmidecode.system().values()[1]['data']['UUID']
-			except Exception as ex:
-				self.fatal("Could not read system UUID\n" + type(ex).__name__ + ": " + type(ex).__name__ + ": " + str(ex))
-				return
-
-			self.add_msg("Cortex: Detected system UUID as " + self.vmuuid)
-
-			## register using vm uuid (rather than username/password)
-			self.add_msg("Cortex: Authenticating to cortex server with system UUID")
-			
-			try:
-				payload = {'ident': self.ident, 'uuid': self.vmuuid}
-				r = requests.post(self.config['cortex_url'] + "api/register", data=payload, verify = self.config['cortex_verify'])
-			except Exception as ex:
-				self.fatal("An error occured when attempting to contact cortex: \n" + type(ex).__name__ + ": " + type(ex).__name__ + ": " + str(ex))
-				return
-
-			if r.status_code == 200:
-				try:
-					self.add_msg("Cortex: Successful response from cortex server")
-					self.json = r.json()
-
-					## Puppet bits
-					self.puppet_private_key = self.json['private_key']
-					self.puppet_public_key  = self.json['public_key']
-					self.puppet_cert        = self.json['cert']
-
-					## Activation key for Satellite
-					self.sat_activation_key = self.json['satellite_activation_key']
-
-					## The hostname and IP address
-					self.hostname = self.json['hostname']
-					self.fqdn     = self.json['fqdn']
-					self.ipaddr   = self.json['ipaddress']
-
-				except Exception as ex:
-					self.fatal("Could not parse return response from cortex: " + type(ex).__name__ + ": " + type(ex).__name__ + ": " + str(ex))
-					return
-
-			elif r.status_code == 403:
-				self.fatal("Cortex rejected our registration request (UUID not found)")
-				return
-			else:
-				self.fatal("Unexpected response code from cortex: HTTP " + str(r.status_code))
-				return
-
-			## Log what we got told for name/fqdn
-			self.add_msg("Cortex: Hostname will be set to: " + self.hostname)
-			self.add_msg("Cortex: FQDN will be set to: " + self.fqdn)
-
-			# Determine what network interface to use
-			## Always use the first network interface except lo (its always going to be eth0 on vmware, but just to be sure...)
-
-			try:
-				interfaces = self.get_network_interfaces()
-			except OSError as ex:
-				self.fatal("Could not obtain the list of local network interfaces: " + str(e))
-				return
-
-			if interfaces == None:
-				self.fatal("Could not obtain the list of local network interfaces: " + str(e))
-				return
-
-			self.netif = interfaces[0]
-			self.add_msg("Cortex: Chosen network interface is: " + self.netif)
-
-			## Now process the given ip address
-			if 'dhcp' in self.ipaddr.lower():
-				self.dhcp = True
-				self.add_msg("Cortex: Networking set to DHCP")
-			else:
-				self.dhcp = False
-
-				try:
-					self.process_ipaddr(self.ipaddr)
-				except ValueError:
-					self.fatal("The IP address set by cortex is invalid: " + str(self.ipaddr))
-					return
-				except LookupError:
-					self.fatal("The IP address set by cortex is not within a known network: " + str(self.ipaddr))
-					return
-
-
-				self.add_msg("Cortex: IP Address will be set to: " + str(self.ipaddr))
-				self.add_msg("Cortex: Netmask will be set to: "    + str(self.netmask))
-				self.add_msg("Cortex: Router will be set to: "     + str(self.router))
-
 		## 1. HOSTNAME #########################################################
-
-		## RHEL7 hostname
-		if self.release == 7:
-			(code, stdout, stderr) = self.sysexec(["/bin/hostnamectl","set-hostname",self.hostname])
-
-			if code != 0:
-				self.fatal("Network: Setting hostname failed: \n" + stdout + "\n" + stderr)
-				return
-			else:
-				self.add_msg("Network: Hostname set to '" + self.hostname + "'")
-
-		## RHEL6 hostname
-		elif self.release == 6:
-			network_config_file = "/etc/sysconfig/network"
-			self.add_msg("Network: Reading global configuration (" + network_config_file + ")")
-
-			if os.path.isfile(network_config_file): 
-				try:
-					with open(network_config_file, "r") as netcfg_file:
-						netcfg = netcfg_file.readlines()
-				except Exception as e:
-					self.add_msg("WARNING: could not read the system network config file " + network_config_file)
-					self.add_msg("WARNING: Because I can't read the existing config file the system configuration might not work")
-					self.add_msg(str(e))
-					netcfg = []
-					self.warnings = self.warnings + 1
-			else:
-				self.add_msg("WARNING: There is no system network config file on this system!")
-				self.add_msg("WARNING: Because I can't read the existing config file the system configuration might not work")
-				netcfg = []
-				self.warnings = self.warnings + 1
-
-			found_hostname = False
-			for i, line in enumerate(netcfg):
-				if line.startswith('HOSTNAME'):
-					found_hostname = True
-					netcfg[i] = "HOSTNAME=" + self.hostname + "\n"
-
-			if not found_hostname:
-				netcfg.append("HOSTNAME=" + self.hostname + "\n")
-
-			## RHEL6 doesn't send the hostname via DHCP by default because: reasons.
-			netcfg.append("DHCP_HOSTNAME=" + self.hostname + "\n")
-
-			self.add_msg("Network: Saving new global configuration with updated hostname")
-			try:
-				with open(network_config_file, "w") as fp:
-					for line in netcfg:
-						fp.write(line)
-				self.add_msg("Network: Saved new global configuration")
-			except Exception as e:
-				self.fatal("Could not write to system network config file " + network_config_file + ":\n" + type(ex).__name__ + ": " + str(ex))
-				return
-
-			## Set hostname live now as well 
-			self.add_msg("Network: Setting runtime hostname")
-			(code, stdout, stderr) = self.sysexec(["/bin/hostname",self.hostname])
-
-			if code != 0:
-				self.fatal("Could not set runtime hostname: \n" + stdout + "\n" + stderr)
-				return
-
-		## 2. FQDN #############################################################
-
-		## set fqdn if not using dhcp
-		if not self.dhcp:
-			try:
-				with open("/etc/hosts", "a") as hosts_file:
-					hosts_file.write(self.ipaddr + "\t" + self.fqdn + "\t" + self.hostname)
-			except Exception as e:
-				self.add_msg("WARNING: could not set fqdn in /etc/hosts:")
-				self.add_msg(str(e))
-				self.warnings = self.warnings + 1
-
-		## dhcp hosts file is set via puppet on each ip address change - we dont need to do it
-
-		## 3. NETWORK ##########################################################
-
-		## turn off network manager
-		if not self.fromTemplate:
-			if self.release == 7:
-				self.add_msg("Network: Stopping NetworkManager")
-				(code, stdout, stderr) = self.sysexec(["/bin/systemctl","stop","NetworkManager"])
-
-				if code != 0:
-					self.fatal("Could not stop the NetworkManager service: \n" + stdout + "\n" + stderr)
-					return
-
-			elif self.release == 6:
-				if os.path.exists("/etc/init.d/NetworkManager"):
-					self.add_msg("Network: Stopping NetworkManager")
-					(code, stdout, stderr) = self.sysexec(["/sbin/service","NetworkManager","stop"])
-
-					if code != 0:
-						self.fatal("Could not stop the NetworkManager service: \n" + stdout + "\n" + stderr)
-						return
-
-		## check the config file exists (it should...)
-		self.add_msg("Network: Reading interface configuration")
-		network_config_file = "/etc/sysconfig/network-scripts/ifcfg-" + self.netif
-		if os.path.isfile(network_config_file):
-			try:
-				with open(network_config_file, "r") as netcfg_file:
-					netcfg = netcfg_file.readlines()
-			except Exception as e:
-				self.add_msg("WARNING: could not read network config file " + network_config_file)
-				self.add_msg("WARNING: Because I can't read the existing config file the network interface is unlikely to work")
-				self.add_msg(str(e))
-				netcfg = []
-				self.warnings = self.warnings + 1
-		else:
-			self.add_msg("WARNING: No existing network configuration file found for interface " + self.netif)
-			self.add_msg("WARNING: Because there is no existing config file the network interface is unlikely to work")
-			netcfg = []
-			self.warnings = self.warnings + 1
-
-		self.add_msg("Network: Generating new interface configuration")
-
-		## remove parts of the existing file we dont want
-		netcfg = [x for x in netcfg if self.netcfg_remove(x)]
-
-		## now add in what we want
-		netcfg.append("PEERDNS=no\n")
-
-		if self.dhcp:
-			netcfg.append("BOOTPROTO=dhcp\n")
-		else:
-			netcfg.append("BOOTPROTO=static\n")
-			netcfg.append("IPADDR=" + self.ipaddr + "\n")
-			netcfg.append("NETMASK=" + str(self.netmask) + "\n")
-			netcfg.append("GATEWAY=" + self.router + "\n")
-
-		if self.release == 6:
-			netcfg.append("NM_CONTROLLED=no\n")
-
-		## now write out the file
-		self.add_msg("Network: Saving new interface configuration")
-		try:
-			with open(network_config_file, "w") as fp:
-				for line in netcfg:
-					fp.write(line)
-			self.add_msg("Network: Saved new interface configuration")
-		except Exception as e:
-			self.fatal("Could not write to network config file " + network_config_file + ":\n" + type(ex).__name__ + ": " + str(ex))
-			return
-
-		## restart the network interface using ifdown/ifup
-		self.add_msg("Network: Stopping interface " + self.netif)
-		(code, stdout, stderr) = self.sysexec(["/sbin/ifdown",self.netif])
+		(code, stdout, stderr) = self.sysexec(["/bin/hostnamectl","set-hostname",self.hostname])
 
 		if code != 0:
-			self.fatal("Could not stop network interface " + self.netif + ": \n" + stdout + "\n" + stderr)
-			return
-
-		self.add_msg("Network: Starting interface " + self.netif)
-		(code, stdout, stderr) = self.sysexec(["/sbin/ifup",self.netif])
-
-		if code != 0:
-			self.fatal("Could not start network interface " + self.netif + ": \n" + stdout + "\n" + stderr)
+			self.fatal("Network: Setting hostname failed: \n" + stdout + "\n" + stderr)
 			return
 		else:
-			self.add_msg("Network: Started interface " + self.netif)
+			self.add_msg("Network: Hostname set to '" + self.hostname + "'")
 
-		## because we set PEERDNS=no in the network settings the system has no idea, even with dhcp, what dns servers to use.
-		## puppet will set them later, but we still need dns servers before that (for talking to satellite/puppet/etc), so we'll write out a sample
-		## resolv.conf to bootstrap us to the puppet stage.
-		## we set PEERDNS=no because puppet manages resolv.conf normally and we dont want the network and puppet fighting over the resolv.conf file.
-		self.log.info("Network: Setting DNS Servers")
+		## 2. SAVE SSH KEY PAIR ################################################
+		# Create the directory
+		if os.path.exists("/etc/soton"):
+			if not os.path.isdir("/etc/soton"):
+				self.fatal("The path /etc/soton exists but it is not a directory")
+				return
+		else:
+			try:
+				os.mkdir("/etc/soton")
+			except Exception as ex: 
+				self.fatal("Failed to create directory /etc/soton: \n" + str(type(ex)) + " - " + str(e))
+				return
+
+		# Save the SSH public key
 		try:
-			with open("/etc/resolv.conf", "w") as fp:
-				fp.write("""search soton.ac.uk
-nameserver 152.78.110.110
-nameserver 152.78.111.81
-nameserver 152.78.111.113
-""")
+			with open('/etc/soton/ssh_public_key', 'w') as f:
+				f.write(self.json['public_key'])
+				f.write("\n")
+
 		except Exception as ex:
-			self.fatal("Could not write to /etc/resolv.conf:\n" + type(ex).__name__ + ": " + str(ex))
+			self.fatal("Failed to write to /etc/soton/ssh_public_key: \n" + str(type(ex)) + " - " + str(e))
 			return
+
+		# Save the SSH private key
+		try:
+			with open('/etc/soton/ssh_private_key', 'w') as f:
+				f.write(self.json['private_key'])
+
+		except Exception as ex:
+			self.fatal("Failed to write to /etc/soton/ssh_private_key: \n" + str(type(ex)) + " - " + str(e))
+			return
+
+		# Set perms on the key
+		try:
+			os.chmod('/etc/soton/ssh_private_key', 0600)
+
+		except Exception as ex:
+			self.fatal("Failed to change permissions on /etc/soton/ssh_private_key: \n" + str(type(ex)) + " - " + str(e))
+			return
+
+		# Save the backup key (for rsyncd)
+		try:
+			with open('/etc/soton/backup_key', 'w') as f:
+				f.write("backup:" + self.json['backup_key'] + "\n")
+
+		except Exception as ex:
+			self.fatal("Failed to write to /etc/soton/backup_key: \n" + str(type(ex)) + " - " + str(e))
+			return
+
+		# Set perms on the key
+		try:
+			os.chmod('/etc/soton/backup_key', 0600)
+
+		except Exception as ex:
+			self.fatal("Failed to change permissions on /etc/soton/backup_key: \n" + str(type(ex)) + " - " + str(e))
+			return
+
+		self.fatal("OKAY DONE :D")
+		return
 
 		## 4. RED HAT SATELLITE ################################################
 
@@ -890,7 +691,7 @@ nameserver 152.78.111.113
 				shutil.rmtree(self.config['puppet_ssldir'])
 			except Exception as ex:
 				self.fatal("Could not delete existing Puppet SSL directory:\n" + type(ex).__name__ + ": " + str(ex))
-				return				
+				return
 
 		self.add_msg("Puppet: Creating new SSL directory")		
 		self.sysexec(self.config['puppet_binary'] + " agent --fingerprint",shell=True)
