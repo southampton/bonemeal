@@ -329,10 +329,10 @@ class Bonemeal:
 		(code, stdout, stderr) = self.sysexec(["/bin/hostnamectl","set-hostname",self.hostname])
 
 		if code != 0:
-			self.fatal("Network: Setting hostname failed: \n" + stdout + "\n" + stderr)
+			self.fatal("Setting hostname failed: \n" + stdout + "\n" + stderr)
 			return
 		else:
-			self.add_msg("Network: Hostname set to '" + self.hostname + "'")
+			self.add_msg("Hostname set to '" + self.hostname + "'")
 
 		## 2. SAVE SSH KEY PAIR ################################################
 		# Create the directory
@@ -344,8 +344,10 @@ class Bonemeal:
 			try:
 				os.mkdir("/etc/soton")
 			except Exception as ex: 
-				self.fatal("Failed to create directory /etc/soton: \n" + str(type(ex)) + " - " + str(e))
+				self.fatal("Failed to create directory /etc/soton: \n" + str(type(ex)) + " - " + str(ex))
 				return
+
+		self.add_msg("Created /etc/soton")
 
 		# Save the SSH public key
 		try:
@@ -354,8 +356,10 @@ class Bonemeal:
 				f.write("\n")
 
 		except Exception as ex:
-			self.fatal("Failed to write to /etc/soton/ssh_public_key: \n" + str(type(ex)) + " - " + str(e))
+			self.fatal("Failed to write to /etc/soton/ssh_public_key: \n" + str(type(ex)) + " - " + str(ex))
 			return
+
+		self.add_msg("Saved the SSH public key")
 
 		# Save the SSH private key
 		try:
@@ -363,16 +367,20 @@ class Bonemeal:
 				f.write(self.json['private_key'])
 
 		except Exception as ex:
-			self.fatal("Failed to write to /etc/soton/ssh_private_key: \n" + str(type(ex)) + " - " + str(e))
+			self.fatal("Failed to write to /etc/soton/ssh_private_key: \n" + str(type(ex)) + " - " + str(ex))
 			return
+
+		self.add_msg("Saved the SSH private key")
 
 		# Set perms on the key
 		try:
 			os.chmod('/etc/soton/ssh_private_key', 0600)
 
 		except Exception as ex:
-			self.fatal("Failed to change permissions on /etc/soton/ssh_private_key: \n" + str(type(ex)) + " - " + str(e))
+			self.fatal("Failed to change permissions on /etc/soton/ssh_private_key: \n" + str(type(ex)) + " - " + str(ex))
 			return
+
+		self.add_msg("Set permissions on the private key")
 
 		# Save the backup key (for rsyncd)
 		try:
@@ -380,389 +388,39 @@ class Bonemeal:
 				f.write("backup:" + self.json['backup_key'] + "\n")
 
 		except Exception as ex:
-			self.fatal("Failed to write to /etc/soton/backup_key: \n" + str(type(ex)) + " - " + str(e))
+			self.fatal("Failed to write to /etc/soton/backup_key: \n" + str(type(ex)) + " - " + str(ex))
 			return
+
+		self.add_msg("Saved the backup key")
 
 		# Set perms on the key
 		try:
 			os.chmod('/etc/soton/backup_key', 0600)
 
 		except Exception as ex:
-			self.fatal("Failed to change permissions on /etc/soton/backup_key: \n" + str(type(ex)) + " - " + str(e))
+			self.fatal("Failed to change permissions on /etc/soton/backup_key: \n" + str(type(ex)) + " - " + str(ex))
+			return 
+
+		self.add_msg("Set permissions on the backup key")
+
+		self.add_msg("port " + str(self.json['backup_port']))
+
+		# Save the ssh backup port - for now we'll save in a simple file, later
+		# versions will save this in a .ini file or something more appropriate.
+		try:
+			with open('/etc/soton/backup_port', 'w') as f:
+				f.write(str(self.json['backup_port']))
+	
+		except Exception as ex:
+			self.fatal("Failed to write to /etc/soton/backup_port: \n" + str(type(ex)) + " - " + str(ex))
 			return
+
+		self.add_msg("Saved the backup port")
 
 		self.fatal("OKAY DONE :D")
 		return
 
-		## 4. RED HAT SATELLITE ################################################
-
-		if self.config['satellite6']:
-
-			## SATELLITE 6
-
-			## satellite cert rpm will already be installed in the template
-			if not self.fromTemplate:
-				self.add_msg("Satellite: Installing certificate RPM")
-				(code, stdout, stderr) = self.sysexec(["rpm","-ivh",self.config['satellite_rpm']])
-
-				if code != 0:
-					self.add_msg("WARNING: could not install certificate RPM for satellite:")
-					self.add_msg(stdout)
-					self.add_msg(stderr)
-					self.warnings = self.warnings + 1
-
-			self.add_msg("Satellite: Registering with Katello")
-			(code, stdout, stderr) = self.sysexec('/usr/sbin/subscription-manager register --org="University_of_Southampton" --activationkey="' + self.sat_activation_key + '"',shell=True) 
-
-			if code != 0:
-				self.fatal("Satellite: Could not register with katello: \n" + stdout + "\n" + stderr)
-				return
-			else:
-				self.add_msg("Satellite: Katello registration successful")
-
-			## katello-agent rpm will already be installed in the template
-			if not self.fromTemplate:
-				self.add_msg("Satellite: Installing katello-agent")
-				(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install katello-agent",shell=True)
-
-				if code != 0:
-					self.fatal("Satellite: Could not install katello-agent: \n" + stdout + "\n" + stderr)
-					return
-				else:
-					self.add_msg("Satellite: Installed katello-agent")
-
-		else:
-
-			## SATELLITE 5
-
-			self.add_msg("Satellite: Downloading rhn-org-trusted-ssl-cert")
-
-			(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/tmp/rhn-org-trusted-ssl-cert.rpm",self.config['satellite_rpm'],"--no-check-certificate"])
-
-			if code != 0:
-				self.fatal("Could not download up2date config file: \n" + stdout + "\n" + stderr)
-				return
-
-			## See if the rpm is already installed
-			(code, stdout, stderr) = self.sysexec(["/bin/rpm","-qi","rhn-org-trusted-ssl-cert"])
-
-			if code == 0:
-				self.add_msg("Satellite: rhn-org-trusted-ssl-cert is already installed")
-			else:
-				self.add_msg("Satellite: Installing rhn-org-trusted-ssl-cert")
-
-				(code, stdout, stderr) = self.sysexec(["/bin/rpm","-Uvh","/tmp/rhn-org-trusted-ssl-cert.rpm"])
-
-				if code != 0:
-					self.fatal("Could not install satellite SSL certificate RPM: \n" + stdout + "\n" + stderr)
-					return
-
-				self.add_msg("Satellite: Installed rhn-org-trusted-ssl-cert")
-
-			self.add_msg("Satellite: Installing up2date config file")
-
-			(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/sysconfig/rhn/up2date","https://rhn.soton.ac.uk/pub/up2date","--no-check-certificate"])
-
-			if code != 0:
-				self.fatal("Could not download up2date config file: \n" + stdout + "\n" + stderr)
-				return
-
-			self.add_msg("Satellite: Installed up2date config file")
-			self.add_msg("Satellite: Registering with rhnregks")
-
-			(code, stdout, stderr) = self.sysexec('/usr/sbin/rhnreg_ks --force --activationkey="' + self.sat_activation_key + '"',shell=True) 
-
-			if code != 0:
-				self.fatal("Could not register with Red Hat Satellite: \n" + stdout + "\n" + stderr)
-				return
-			else:
-				self.add_msg("Satellite: Registration successful")
-
-			## 5. RPM GPG KEYS #####################################################
-
-			## iSolutions GPG Key
-			(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/pki/rpm-gpg/ISOLUTIONS-PUBLIC-KEY","https://rhn.soton.ac.uk/pub/ISOLUTIONS-PUBLIC-KEY","--no-check-certificate"])
-
-			if code != 0:
-				self.fatal("Could not download the iSolutions RPM GPG key: \n" + stdout + "\n" + stderr)
-				return
-
-			(code, stdout, stderr) = self.sysexec(["/bin/rpm","--import","/etc/pki/rpm-gpg/ISOLUTIONS-PUBLIC-KEY"])
-
-			if code != 0:
-				self.fatal("Could not import the iSolutions RPM GPG key: \n" + stdout + "\n" + stderr)
-				return
-
-			if self.release == 7:
-				epel_key = "https://rhn.soton.ac.uk/pub/RPM-GPG-KEY-EPEL-7"
-			elif self.release == 6:
-				epel_key = "https://rhn.soton.ac.uk/pub/RPM-GPG-KEY-EPEL"
-
-			## EPEL GPG Key
-			(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL",epel_key,"--no-check-certificate"])
-
-			if code != 0:
-				self.fatal("Could not download the EPEL RPM GPG key: \n" + stdout + "\n" + stderr)
-				return
-
-			(code, stdout, stderr) = self.sysexec(["/bin/rpm","--import","/etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL"])
-
-			if code != 0:
-				self.fatal("Could not import the EPEL RPM GPG key: \n" + stdout + "\n" + stderr)
-				return
-
-			## PuppetLabs Yum Repository GPG Key
-			(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/pki/rpm-gpg/RPM-GPG-KEY-PUPPET-COLLECTIONS","https://rhn.soton.ac.uk/pub/RPM-GPG-KEY-PUPPET-COLLECTIONS","--no-check-certificate"])
-
-			if code != 0:
-				self.fatal("Could not download the Puppet RPM GPG key: \n" + stdout + "\n" + stderr)
-				return
-
-			(code, stdout, stderr) = self.sysexec(["/bin/rpm","--import","/etc/pki/rpm-gpg/RPM-GPG-KEY-PUPPET-COLLECTIONS"])
-
-			if code != 0:
-				self.fatal("Could not import the Puppet RPM GPG key: \n" + stdout + "\n" + stderr)
-				return
-
-		## 6. YUM UPDATE #######################################################
-
-		self.add_msg("Update: Installing latest updates")
-		(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y update",shell=True)
-
-		if code != 0:
-			self.add_msg("WARNING: non-zero exit occured during yum update:")
-			self.add_msg(stdout)
-			self.add_msg(stderr)
-			self.warnings = self.warnings + 1
-
-		## 7. LVM SECOND DISK ##################################################
-
-		if self.fromTemplate:
-			# Check that a second disk exists
-			if os.path.exists('/dev/sdb'):
-				# Log
-				self.add_msg("Disks: Found a second disk, checking for LVM")
-
-				# If it exists, check for an existing LVM PV
-				(code, stdout, stderr) = self.sysexec(["/sbin/pvdisplay", "/dev/sdb"])
-
-				# If the exist code is non-zero, assume that it does not exist, and go
-				# ahead and create it. Any of this failing is fatal otherwise Puppet could
-				# end up putting things in the wrong disk when it does it's Puppet run
-				if code != 0:
-					# We need to create a n LVM physical volume
-					self.add_msg("Disks: No LVM PV found, creating PV")
-					(code, stdout, stderr) = self.sysexec(["/sbin/pvcreate", "-y", "/dev/sdb"])
-
-					if code != 0:
-						self.fatal("Failed to create LVM physical volume on /dev/sdb: \n" + stdout + "\n" + stderr)
-						return
-
-					# pvcreate succeeded, create a volume group
-					self.add_msg("Disks: Physical volume created. Creating volume group")
-					(code, stdout, stderr) = self.sysexec(["/sbin/vgcreate", "-y", "datavg", "/dev/sdb"])
-
-					if code != 0:
-						self.fatal("Failed to create LVM logical volume: \n" + stdout + "\n" + stderr)
-						return
-
-					# vgcreate succeeded, create a logical volume
-					self.add_msg("Disks: Volume group created. Creating logical volume")
-					(code, stdout, stderr) = self.sysexec(["/sbin/lvcreate", "-y", "-l100%FREE", "-n", "data", "datavg"])
-
-					if code != 0:
-						self.fatal("Failed to create new logical volume: \n" + stdout + "\n" + stderr)
-						return
-
-					# lvcreate succeeded, create an XFS or EXT4 filesystem depending on the OS
-					self.add_msg("Disks: Logical volume creation complete. Creating filesystem")
-					if self.release == 6:
-						(code, stdout, stderr) = self.sysexec(["/sbin/mkfs.ext4", "-L", "data", "/dev/mapper/datavg-data"])
-					elif self.release == 7:
-						(code, stdout, stderr) = self.sysexec(["/sbin/mkfs.xfs", "-L", "data", "/dev/mapper/datavg-data"])
-
-					if code != 0:
-						self.fatal("Failed to create filesystem on new logical volume: \n" + stdout + "\n" + stderr)
-						return
-
-					# Filesystem created, update fstab. Note that the newline at the end of the 
-					# fstab append is required (at least in RHEL6, RHEL7 was less irritated by it)
-					self.add_msg("Disks: Filesystem created. Updating fstab")
-					try:
-						with open('/etc/fstab', 'a') as fp:
-							if self.release == 6:
-								fp.write("\nLABEL=data          /srv           ext4    defaults        0 0\n")
-							elif self.release == 7:
-								fp.write("\nLABEL=data          /srv           xfs     defaults        0 0\n")
-					except Exception as e:
-						self.fatal("Failed to update fstab: \n" + str(e))
-						return
-
-					# fstab updated, create symlink from /data -> /srv
-					self.add_msg("Disks: Symlinking /data to /srv")
-					try:
-						os.symlink('/srv', '/data')
-					except Exception as e:
-						self.fatal("Failed to create symlink: \n" + str(e))
-						return
-
-					# Symlink created. Mount the new filesystem
-					self.add_msg("Disks: Mounting created /srv filesystem")
-					(code, stdout, stderr) = self.sysexec(["/bin/mount", "/srv"])
-					
-					if code != 0:
-						self.fatal("Failed to mount /srv filesystem: \n" + stdout + "\n" + stderr)
-						return
-				else:
-					self.add_msg("Disks: No second disk detected at /dev/sdb - skipping")
-
-
-		## 8. PUPPET PREP ######################################################
-
-		## If we are installing from a template then we need to stop puppet running before
-		## messing with it. Puppet won't be working anyway at the moment because tprep
-		## will have wiped its certificates.
-
-		## templates will have puppet running, we want to stop that before we mess with puppet.
-		if self.fromTemplate:
-			if self.release == 7:
-				self.add_msg("Puppet: Stopping agent")
-				(code, stdout, stderr) = self.sysexec(["/bin/systemctl","stop","puppet"])
-
-				if code != 0:
-					self.fatal("Could not stop the Puppet agent service: \n" + stdout + "\n" + stderr)
-					return
-
-			elif self.release == 6:
-				self.add_msg("Puppet: Stopping agent")
-				(code, stdout, stderr) = self.sysexec(["/sbin/service","puppet","stop"])
-
-				if code != 0:
-					self.fatal("Could not stop the Puppet agent service: \n" + stdout + "\n" + stderr)
-					return
-
-		# a dependency on our use of puppet is lsb based facter variables
-		# so we install it first.
-		# this will already be installed in the template
-		if not self.fromTemplate:
-			self.add_msg("Puppet: Installing redhat-lsb-core package")
-			(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install redhat-lsb-core",shell=True)
-
-			if code != 0:
-				self.fatal("Could not install redhat-lsb-core: \n" + stdout + "\n" + stderr)
-				return
-
-		## If puppet was set to skip, then quit here.
-		if self.config['skip_puppet'] and not self.fromTemplate:
-			self.view_finish()
-			return
-
-		## INSTALL PUPPET
-		# this will already be installed in the template
-		if not self.fromTemplate:
-			self.add_msg("Puppet: Installing puppet-agent")
-			(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install puppet-agent",shell=True)
-
-			if code != 0:
-				self.fatal("Could not install Puppet: \n" + stdout + "\n" + stderr)
-				return
-
-		## SET CONFIG - server
-		self.add_msg("Puppet: Setting master server to " + self.config['puppet_master'])
-		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " config set server " + self.config['puppet_master'] + " --section agent",shell=True)
-
-		if code != 0:
-			self.fatal("Could not set puppet master: \n" + stdout + "\n" + stderr)
-			return
-
-		## SET CONFIG - certname
-		self.add_msg("Puppet: Setting certname to " + self.fqdn)
-		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " config set certname	 " + self.fqdn + " --section agent",shell=True)
-
-		if code != 0:
-			self.fatal("Could not set puppet certname: \n" + stdout + "\n" + stderr)
-			return
-
-		## Remove existing puppet SSL configuration.
-		if os.path.exists(self.config['puppet_ssldir']):
-			self.add_msg("Puppet: Removing existing SSL directory, if any")
-			try:
-				self.log.info("executing shutil.rmtree against path: " + self.config['puppet_ssldir'])
-				shutil.rmtree(self.config['puppet_ssldir'])
-			except Exception as ex:
-				self.fatal("Could not delete existing Puppet SSL directory:\n" + type(ex).__name__ + ": " + str(ex))
-				return
-
-		self.add_msg("Puppet: Creating new SSL directory")		
-		self.sysexec(self.config['puppet_binary'] + " agent --fingerprint",shell=True)
-		## it will ALWAYS error here (yay puppet), so ignore
-
-		## Deploy certificates and set certname option in puppet.conf
-		self.add_msg("Puppet: Saving client certificate")
-		try:
-			with open(self.config['puppet_ssldir'] + "certs/" + self.fqdn + ".pem", "w") as fp:
-				fp.write(self.puppet_cert)
-
-			with open(self.config['puppet_ssldir'] + "public_keys/" + self.fqdn + ".pem", "w") as fp:
-				fp.write(self.puppet_public_key)
-
-			with open(self.config['puppet_ssldir'] + "private_keys/" + self.fqdn + ".pem", "w") as fp:
-				fp.write(self.puppet_private_key)
-		except Exception as ex:
-			self.fatal("Could not save puppet certificate files:\n" + type(ex).__name__ + ": " + str(ex))
-			return
-
-		self.add_msg("Puppet: Applying policy")
-		## we run twice just to be sure. we only care about the exit code of the second
-		self.sysexec(self.config['puppet_binary'] + " agent --test",shell=True)
-		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " agent --test",shell=True)
-
-		if code != 0 and code != 2:
-			self.fatal("Puppet reported an error when applying policy to this system: \n" + stdout + "\n" + stderr)
-			return
-
-		## Set Puppet to run all the time
-		self.add_msg("Puppet: Enabling on startup")
-		if self.release == 7:
-			(code, stdout, stderr) = self.sysexec(["/bin/systemctl","enable","puppet"])
-
-			if code != 0:
-				self.add_msg("WARNING: Failed to configure Puppet to launch on startup")
-				self.add_msg(stdout)
-				self.add_msg(stderr)
-				self.warnings = self.warnings + 1
-
-		elif self.release == 6:
-			(code, stdout, stderr) = self.sysexec(["/sbin/chkconfig","puppet","on"])
-
-			if code != 0:
-				self.add_msg("WARNING: Failed to configure Puppet to launch on startup")
-				self.add_msg(stdout)
-				self.add_msg(stderr)
-				self.warnings = self.warnings + 1
-
-		if self.fromTemplate:
-
-			## update the server to say we're done installing
-			try:
-				payload = {'uuid': self.vmuuid}
-				r = requests.post(self.config['cortex_url'] + "api/installer/notify", data=payload, verify = self.config['cortex_verify'])
-
-				if r.status_code != 200:
-					raise Exception("non-200 response from cortex")
-
-			except Exception as ex:
-				self.warnings = self.warnings + 1
-				self.add_msg("WARNING: Could not notify cortex that the installation is complete")
-
-			if self.warnings > 0:
-				self.view_finish()
-			else:
-				## automated install - so just reboot
-				self.exit_installer()
-		else:
-			## Interactive install
-			self.view_finish()
+		self.view_finish()
 
 ################################################################################
 
