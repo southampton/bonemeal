@@ -37,6 +37,8 @@ class Bonemeal:
 		'puppet_binary' : '/opt/puppetlabs/bin/puppet',
 		'server_url'    : 'http://localhost:8000/',
 		'server_verify' : False,
+		'ssh_puppet_user' : 'test',
+		'ssh_puppet_server': 'localhost',
 	}
 
 	## colour setup
@@ -416,6 +418,29 @@ class Bonemeal:
 			return
 
 		self.add_msg("Saved the backup port")
+
+		# Create the directory for Puppet modules
+		if os.path.exists("/etc/soton/puppet"):
+			if not os.path.isdir("/etc/soton/puppet"):
+				self.fatal("The path /etc/soton/puppet exists but it is not a directory")
+				return
+		else:
+			try:
+				os.mkdir("/etc/soton/puppet")
+			except Exception as ex: 
+				self.fatal("Failed to create directory /etc/soton/puppet: \n" + str(type(ex)) + " - " + str(ex))
+				return
+
+		self.add_msg("Created /etc/soton/puppet")
+
+		## Now we download the puppet modules over rsync+ssh
+		self.add_msg("Downloading Puppet modules into /etc/soton/puppet")
+
+		(code, stdout, stderr) = self.sysexec("""/usr/bin/rsync -e "ssh -i /etc/soton/ssh_private_key -o PreferredAuthentications=publickey" -av %s@%s: /etc/soton/puppet/""" % (self.config['ssh_puppet_user'],self.config['ssh_puppet_server'],),shell=True)
+
+		if code != 0:
+			self.fatal("Could not download Puppet modules: \n" + stdout + "\n" + stderr)
+			return
 
 		self.fatal("OKAY DONE :D")
 		return
