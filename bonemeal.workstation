@@ -13,32 +13,25 @@ import subprocess # for sysexec
 import requests   # for auth/register
 import logging    # for logging during installation
 import time       # for pausing at startup to avoid nasty boot messages
-from netaddr import IPAddress, IPNetwork # for network configuration
 import ConfigParser # for config
 import traceback   # for exception handling
 import sys
 import termios
 import dmidecode
-import shutil
-
-# ask for hostname
-# ask for username/password
-# contact registration server
-# save SSH key pair
-# rsync down the puppet modules using the ssh keypair
 
 class Bonemeal:
 	version       = 'DEV'
 
 	# [bonemeal]
 	config = {
-		'title'         : 'Linux Desktop 7 Setup',
-		'log_file'      : '/var/log/bonemeal.log',
-		'puppet_binary' : '/opt/puppetlabs/bin/puppet',
-		'server_url'    : 'http://localhost:8000/',
-		'server_verify' : False,
-		'ssh_puppet_user' : 'test',
+		'title'         :    'Linux Desktop 7 Setup',
+		'log_file'      :    '/var/log/bonemeal.log',
+		'puppet_binary' :    '/opt/puppetlabs/bin/puppet',
+		'server_url'    :    'http://localhost:8000/',
+		'server_verify' :    False,
+		'ssh_puppet_user' :  'test',
 		'ssh_puppet_server': 'localhost',
+		'base_dir':          '/etc/soton', #should not end with a slash!
 	}
 
 	## colour setup
@@ -77,6 +70,10 @@ class Bonemeal:
 				pass
 			except ConfigParser.NoOptionError as ex:
 				pass
+
+			# Remove trailing slash on basedir
+			if self.config['base_dir'].endswith("/"):
+				self.config['base_dir'] = self.config['base_dir'][:-1]
 
 		except Exception as ex:
 			print "[bonemeal] Could not read from config file " + CONFIG_FILE + ": " + str(ex)
@@ -338,69 +335,69 @@ class Bonemeal:
 
 		## 2. SAVE SSH KEY PAIR ################################################
 		# Create the directory
-		if os.path.exists("/etc/soton"):
-			if not os.path.isdir("/etc/soton"):
-				self.fatal("The path /etc/soton exists but it is not a directory")
+		if os.path.exists(self.config['base_dir']):
+			if not os.path.isdir(self.config['base_dir']):
+				self.fatal("The path " + self.config['base_dir'] + " exists but it is not a directory")
 				return
 		else:
 			try:
-				os.mkdir("/etc/soton")
+				os.mkdir(self.config['base_dir'])
 			except Exception as ex: 
-				self.fatal("Failed to create directory /etc/soton: \n" + str(type(ex)) + " - " + str(ex))
+				self.fatal("Failed to create directory " + self.config['base_dir'] + ": \n" + str(type(ex)) + " - " + str(ex))
 				return
 
-		self.add_msg("Created /etc/soton")
+		self.add_msg("Created " + self.config['base_dir'])
 
 		# Save the SSH public key
 		try:
-			with open('/etc/soton/ssh_public_key', 'w') as f:
+			with open(self.config['base_dir'] + '/ssh_public_key', 'w') as f:
 				f.write(self.json['public_key'])
 				f.write("\n")
 
 		except Exception as ex:
-			self.fatal("Failed to write to /etc/soton/ssh_public_key: \n" + str(type(ex)) + " - " + str(ex))
+			self.fatal("Failed to write to " + self.config['base_dir'] + "/ssh_public_key: \n" + str(type(ex)) + " - " + str(ex))
 			return
 
 		self.add_msg("Saved the SSH public key")
 
 		# Save the SSH private key
 		try:
-			with open('/etc/soton/ssh_private_key', 'w') as f:
+			with open(self.config['base_dir'] + '/ssh_private_key', 'w') as f:
 				f.write(self.json['private_key'])
 
 		except Exception as ex:
-			self.fatal("Failed to write to /etc/soton/ssh_private_key: \n" + str(type(ex)) + " - " + str(ex))
+			self.fatal("Failed to write to " + self.config['base_dir'] + "/ssh_private_key: \n" + str(type(ex)) + " - " + str(ex))
 			return
 
 		self.add_msg("Saved the SSH private key")
 
 		# Set perms on the key
 		try:
-			os.chmod('/etc/soton/ssh_private_key', 0600)
+			os.chmod(self.config['base_dir'] + '/ssh_private_key', 0600)
 
 		except Exception as ex:
-			self.fatal("Failed to change permissions on /etc/soton/ssh_private_key: \n" + str(type(ex)) + " - " + str(ex))
+			self.fatal("Failed to change permissions on " + self.config['base_dir'] + "/ssh_private_key: \n" + str(type(ex)) + " - " + str(ex))
 			return
 
 		self.add_msg("Set permissions on the private key")
 
 		# Save the backup key (for rsyncd)
 		try:
-			with open('/etc/soton/backup_key', 'w') as f:
+			with open(self.config['base_dir'] + '/backup_key', 'w') as f:
 				f.write("backup:" + self.json['backup_key'] + "\n")
 
 		except Exception as ex:
-			self.fatal("Failed to write to /etc/soton/backup_key: \n" + str(type(ex)) + " - " + str(ex))
+			self.fatal("Failed to write to " + self.config['base_dir'] + "/backup_key: \n" + str(type(ex)) + " - " + str(ex))
 			return
 
 		self.add_msg("Saved the backup key")
 
 		# Set perms on the key
 		try:
-			os.chmod('/etc/soton/backup_key', 0600)
+			os.chmod(self.config['base_dir'] + '/backup_key', 0600)
 
 		except Exception as ex:
-			self.fatal("Failed to change permissions on /etc/soton/backup_key: \n" + str(type(ex)) + " - " + str(ex))
+			self.fatal("Failed to change permissions on " + self.config['base_dir'] + "/backup_key: \n" + str(type(ex)) + " - " + str(ex))
 			return 
 
 		self.add_msg("Set permissions on the backup key")
@@ -410,40 +407,49 @@ class Bonemeal:
 		# Save the ssh backup port - for now we'll save in a simple file, later
 		# versions will save this in a .ini file or something more appropriate.
 		try:
-			with open('/etc/soton/backup_port', 'w') as f:
+			with open(self.config['base_dir'] + '/backup_port', 'w') as f:
 				f.write(str(self.json['backup_port']))
 	
 		except Exception as ex:
-			self.fatal("Failed to write to /etc/soton/backup_port: \n" + str(type(ex)) + " - " + str(ex))
+			self.fatal("Failed to write to " + self.config['base_dir'] + "/backup_port: \n" + str(type(ex)) + " - " + str(ex))
 			return
 
 		self.add_msg("Saved the backup port")
 
 		# Create the directory for Puppet modules
-		if os.path.exists("/etc/soton/puppet"):
-			if not os.path.isdir("/etc/soton/puppet"):
-				self.fatal("The path /etc/soton/puppet exists but it is not a directory")
+		if os.path.exists(self.config['base_dir'] + "/puppet"):
+			if not os.path.isdir(self.config['base_dir'] + "/puppet"):
+				self.fatal("The path " + self.config['base_dir'] + "/puppet exists but it is not a directory")
 				return
 		else:
 			try:
-				os.mkdir("/etc/soton/puppet")
+				os.mkdir(self.config['base_dir'] + "/puppet")
 			except Exception as ex: 
-				self.fatal("Failed to create directory /etc/soton/puppet: \n" + str(type(ex)) + " - " + str(ex))
+				self.fatal("Failed to create directory " + self.config['base_dir'] + "/puppet: \n" + str(type(ex)) + " - " + str(ex))
 				return
 
-		self.add_msg("Created /etc/soton/puppet")
+		self.add_msg("Created " + self.config['base_dir'] + "/puppet")
 
 		## Now we download the puppet modules over rsync+ssh
-		self.add_msg("Downloading Puppet modules into /etc/soton/puppet")
+		self.add_msg("Downloading Puppet modules into " + self.config['base_dir'] + "/puppet")
 
-		(code, stdout, stderr) = self.sysexec("""/usr/bin/rsync -e "ssh -i /etc/soton/ssh_private_key -o PreferredAuthentications=publickey" -av %s@%s: /etc/soton/puppet/""" % (self.config['ssh_puppet_user'],self.config['ssh_puppet_server'],),shell=True)
+		(code, stdout, stderr) = self.sysexec("""/usr/bin/rsync -e "ssh -i %s/ssh_private_key -o PreferredAuthentications=publickey" -av %s@%s: %s/puppet/""" % (self.config['base_dir'], self.config['ssh_puppet_user'],self.config['ssh_puppet_server'],self.config['base_dir'],),shell=True)
 
 		if code != 0:
 			self.fatal("Could not download Puppet modules: \n" + stdout + "\n" + stderr)
 			return
 
-		self.fatal("OKAY DONE :D")
-		return
+		self.add_msg("Applying Puppet rules")
+
+		## We run this twice because: Puppet
+		## We only care about the output of the second command
+
+		(code, stdout, stderr) = self.sysexec("""%s apply --modulepath %s/puppet/modules/ %s/puppet/manifests/site.pp""" % (self.config['puppet_binary'],self.config['base_dir'],self.config['base_dir']),shell=True)
+		(code, stdout, stderr) = self.sysexec("""%s apply --modulepath %s/puppet/modules/ %s/puppet/manifests/site.pp""" % (self.config['puppet_binary'],self.config['base_dir'],self.config['base_dir']),shell=True)
+
+		if code != 0:
+			self.fatal("An error occured whilst applying system policy: \n" + stdout + "\n" + stderr)
+			return
 
 		self.view_finish()
 
@@ -483,12 +489,8 @@ class Bonemeal:
 		## Mark bonemeal as not starting at reboot
 		os.unlink('/.bonemeal')
 
-		## Delete the template marker file too, if appropriate
-		if self.fromTemplate:
-			os.unlink('/.bonemeal_template')
-
 		## reboot
-		self.sysexec("/sbin/reboot")
+#		self.sysexec("/sbin/reboot")
 
 		## exit (We probably never get this far)
 		raise urwid.ExitMainLoop()
