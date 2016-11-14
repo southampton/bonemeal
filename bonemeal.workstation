@@ -186,6 +186,10 @@ class Bonemeal:
 		except Exception as ex:
 			self.asset_tag = None
 
+		## Only set the UOS name if it matches UOS-number or ISS-number
+		if not re.match(r"^(uos|iss|lnx)\-[0-9]{2,8}$",self.asset_tag):
+			self.asset_tag = None
+
 		div = urwid.Divider()
 		htxt = urwid.Text(u"Please enter the name of the computer. You can use the arrow keys to move between fields.",align='left')
 
