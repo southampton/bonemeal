@@ -1,0 +1,18 @@
+#!/bin/bash
+
+if [ -f /.bonemeal ]; then
+
+	## prevent logs from being printed on tty1
+	/bin/dmesg -n1
+
+	echo "[bonemeal] Updating installer from install.soton.ac.uk..."
+	sleep 5
+
+	mkdir -p /mnt/build
+	mount -o nolock install.soton.ac.uk:/data/bonemeal /mnt/build
+	cp /mnt/build/bonemeal.workstation /sbin/soton-setup-run
+	umount /mnt/build
+	chmod 0755 /sbin/soton-setup-run
+
+	/sbin/soton-setup-run
+fi
