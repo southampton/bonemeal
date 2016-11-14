@@ -18,6 +18,7 @@ import traceback   # for exception handling
 import sys
 import termios
 import dmidecode
+import re
 
 class Bonemeal:
 	version       = 'DEV'
