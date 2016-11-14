@@ -187,7 +187,7 @@ class Bonemeal:
 			self.asset_tag = None
 
 		div = urwid.Divider()
-		htxt = urwid.Text(u"Please enter the name of the computer. Use can use the arrow keys to move between fields.",align='left')
+		htxt = urwid.Text(u"Please enter the name of the computer. You can use the arrow keys to move between fields.",align='left')
 
 		self.hostname_edit = urwid.Edit( caption=('label'," Name:  "))
 		ed = urwid.AttrMap(self.hostname_edit, 'edit')
