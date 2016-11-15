@@ -188,7 +188,7 @@ class Bonemeal:
 			self.asset_tag = None
 
 		## Only set the UOS name if it matches UOS-number or ISS-number
-		if not re.match(r"^(uos|iss|lnx)\-[0-9]{2,8}$",self.asset_tag):
+		if not re.match(r"^(uos|iss|lnx|UOS|ISS|LNX)\-[0-9]{2,8}$",self.asset_tag):
 			self.asset_tag = None
 
 		div = urwid.Divider()
@@ -228,7 +228,7 @@ class Bonemeal:
 			self.hostname_error.set_text("That hostname is invalid. Please try again.")
 			return
 
-		if not re.match(r"^(uos|iss|lnx)\-[0-9]{2,8}$",self.hostname):
+		if not re.match(r"^(uos|iss|lnx|UOS|ISS|LNX)\-[0-9]{2,8}$",self.hostname):
 			self.hostname_error.set_text("That name is invalid. It must be of the form UOS-<number>")
 			return
 
