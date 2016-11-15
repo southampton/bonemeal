@@ -228,6 +228,10 @@ class Bonemeal:
 			self.hostname_error.set_text("That hostname is invalid. Please try again.")
 			return
 
+		if not re.match(r"^(uos|iss|lnx)\-[0-9]{2,8}$",self.hostname):
+			self.hostname_error.set_text("That name is invalid. It must be of the form UOS-<number>")
+			return
+
 		self.log.info("chosen hostname: " + self.hostname)
 
 		# Strip off the domain
@@ -438,7 +442,7 @@ class Bonemeal:
 		## Now we download the puppet modules over rsync+ssh
 		self.add_msg("Downloading Puppet modules into " + self.config['base_dir'] + "/puppet")
 
-		(code, stdout, stderr) = self.sysexec("""/usr/bin/rsync -e "ssh -i %s/ssh_private_key -o PreferredAuthentications=publickey" -av %s@%s: %s/puppet/""" % (self.config['base_dir'], self.config['ssh_puppet_user'],self.config['ssh_puppet_server'],self.config['base_dir'],),shell=True)
+		(code, stdout, stderr) = self.sysexec("""/usr/bin/rsync -e "ssh -i %s/ssh_private_key -o PreferredAuthentications=publickey -oStrictHostKeyChecking=no" -av %s@%s: %s/puppet/""" % (self.config['base_dir'], self.config['ssh_puppet_user'],self.config['ssh_puppet_server'],self.config['base_dir'],),shell=True)
 
 		if code != 0:
 			self.fatal("Could not download Puppet modules: \n" + stdout + "\n" + stderr)
