@@ -21,7 +21,7 @@ import dmidecode
 import re
 
 class Bonemeal:
-	version       = 'DEV'
+	version       = '2016-11-17-01'
 
 	# [bonemeal]
 	config = {
@@ -411,19 +411,28 @@ class Bonemeal:
 
 		self.add_msg("Set permissions on the backup key")
 
-		self.add_msg("port " + str(self.json['backup_port']))
+		drone_config = ConfigParser.RawConfigParser()
+		drone_config.add_section('backup')
+		drone_config.add_section('puppet')
+		drone_config.add_section('server')
+		drone_config.set('backup','port', str(self.json['backup_port']))
 
-		# Save the ssh backup port - for now we'll save in a simple file, later
-		# versions will save this in a .ini file or something more appropriate.
+		drone_config.set('puppet','user', self.config['ssh_puppet_user'])
+		drone_config.set('puppet','server', self.config['ssh_puppet_server'])
+		drone_config.set('puppet','binary', self.config['puppet_binary'])
+
+		drone_config.set('server','address', self.config['server_url'])
+		drone_config.set('server','verify', self.config['server_verify'])
+
 		try:
-			with open(self.config['base_dir'] + '/backup_port', 'w') as f:
-				f.write(str(self.json['backup_port']))
+			with open(self.config['base_dir'] + '/drone.conf', 'w') as f:
+				drone_config.write(f)
 	
 		except Exception as ex:
-			self.fatal("Failed to write to " + self.config['base_dir'] + "/backup_port: \n" + str(type(ex)) + " - " + str(ex))
+			self.fatal("Failed to write to " + self.config['base_dir'] + "/drone.conf: \n" + str(type(ex)) + " - " + str(ex))
 			return
 
-		self.add_msg("Saved the backup port")
+		self.add_msg("Saved drone configuration")
 
 		# Create the directory for Puppet modules
 		if os.path.exists(self.config['base_dir'] + "/puppet"):
@@ -496,7 +505,10 @@ class Bonemeal:
 
 	def exit_installer(self):
 		## Mark bonemeal as not starting at reboot
-		os.unlink('/.bonemeal')
+		try:
+			os.unlink('/.bonemeal')
+		except Exception as ex:
+			pass
 
 		## reboot
 #		self.sysexec("/sbin/reboot")
