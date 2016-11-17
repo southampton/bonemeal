@@ -21,7 +21,7 @@ import dmidecode
 import re
 
 class Bonemeal:
-	version       = '2016-11-17-01'
+	version       = '2016-11-17-02'
 
 	# [bonemeal]
 	config = {
@@ -462,8 +462,8 @@ class Bonemeal:
 		## We run this twice because: Puppet
 		## We only care about the output of the second command
 
-		(code, stdout, stderr) = self.sysexec("""%s apply --modulepath %s/puppet/modules/ %s/puppet/manifests/site.pp""" % (self.config['puppet_binary'],self.config['base_dir'],self.config['base_dir']),shell=True)
-		(code, stdout, stderr) = self.sysexec("""%s apply --modulepath %s/puppet/modules/ %s/puppet/manifests/site.pp""" % (self.config['puppet_binary'],self.config['base_dir'],self.config['base_dir']),shell=True)
+		(code, stdout, stderr) = self.sysexec("""%s apply --detailed-exitcodes --modulepath %s/puppet/modules/ %s/puppet/manifests/site.pp""" % (self.config['puppet_binary'],self.config['base_dir'],self.config['base_dir']),shell=True)
+		(code, stdout, stderr) = self.sysexec("""%s apply --detailed-exitcodes --modulepath %s/puppet/modules/ %s/puppet/manifests/site.pp""" % (self.config['puppet_binary'],self.config['base_dir'],self.config['base_dir']),shell=True)
 
 		if code != 0:
 			self.fatal("An error occured whilst applying system policy: \n" + stdout + "\n" + stderr)
