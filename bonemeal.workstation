@@ -451,7 +451,7 @@ class Bonemeal:
 		## Now we download the puppet modules over rsync+ssh
 		self.add_msg("Downloading Puppet modules into " + self.config['base_dir'] + "/puppet")
 
-		(code, stdout, stderr) = self.sysexec("""/usr/bin/rsync -e "ssh -i %s/ssh_private_key -o PreferredAuthentications=publickey -oStrictHostKeyChecking=no" -av %s@%s: %s/puppet/""" % (self.config['base_dir'], self.config['ssh_puppet_user'],self.config['ssh_puppet_server'],self.config['base_dir'],),shell=True)
+		(code, stdout, stderr) = self.sysexec("""/usr/bin/rsync -e "ssh -i %s/ssh_private_key -o PreferredAuthentications=publickey -oStrictHostKeyChecking=no" -av --delete %s@%s: %s/puppet/""" % (self.config['base_dir'], self.config['ssh_puppet_user'],self.config['ssh_puppet_server'],self.config['base_dir'],),shell=True)
 
 		if code != 0:
 			self.fatal("Could not download Puppet modules: \n" + stdout + "\n" + stderr)
