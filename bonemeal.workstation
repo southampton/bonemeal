@@ -417,7 +417,7 @@ class Bonemeal:
 		drone_config.add_section('backup')
 		drone_config.add_section('puppet')
 		drone_config.add_section('server')
-		drone_config.set('backup','ssh_port', str(self.json['backup_port']))
+		drone_config.set('backup','port', str(self.json['backup_port']))
 		drone_config.set('backup','server', str(self.json['backup_server']))
 		drone_config.set('backup','user', str(self.json['backup_user']))
 
