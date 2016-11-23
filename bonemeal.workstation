@@ -21,7 +21,7 @@ import dmidecode
 import re
 
 class Bonemeal:
-	version       = '2016-11-17-02'
+	version       = '2016-11-23-01'
 
 	# [bonemeal]
 	config = {
@@ -30,8 +30,10 @@ class Bonemeal:
 		'puppet_binary' :    '/opt/puppetlabs/bin/puppet',
 		'server_url'    :    'http://localhost:8000/',
 		'server_verify' :    False,
-		'ssh_puppet_user' :  'test',
-		'ssh_puppet_server': 'localhost',
+		'ssh_puppet_user' :  'changeme',
+		'ssh_puppet_server': 'changeme',
+		'ssh_backup_user':   'changeme',
+		'ssh_backup_server': 'changeme'
 		'base_dir':          '/etc/soton', #should not end with a slash!
 	}
 
@@ -415,7 +417,9 @@ class Bonemeal:
 		drone_config.add_section('backup')
 		drone_config.add_section('puppet')
 		drone_config.add_section('server')
-		drone_config.set('backup','port', str(self.json['backup_port']))
+		drone_config.set('backup','ssh_port', str(self.json['backup_port']))
+		drone_config.set('backup','server', str(self.json['backup_server']))
+		drone_config.set('backup','user', str(self.json['backup_user']))
 
 		drone_config.set('puppet','user', self.config['ssh_puppet_user'])
 		drone_config.set('puppet','server', self.config['ssh_puppet_server'])
