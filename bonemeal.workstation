@@ -21,7 +21,7 @@ import dmidecode
 import re
 
 class Bonemeal:
-	version       = '2016-11-23-01'
+	version       = '2016-11-23-03'
 
 	# [bonemeal]
 	config = {
@@ -33,7 +33,7 @@ class Bonemeal:
 		'ssh_puppet_user' :  'changeme',
 		'ssh_puppet_server': 'changeme',
 		'ssh_backup_user':   'changeme',
-		'ssh_backup_server': 'changeme'
+		'ssh_backup_server': 'changeme',
 		'base_dir':          '/etc/soton', #should not end with a slash!
 	}
 
@@ -417,16 +417,16 @@ class Bonemeal:
 		drone_config.add_section('backup')
 		drone_config.add_section('puppet')
 		drone_config.add_section('server')
-		drone_config.set('backup','port', str(self.json['backup_port']))
-		drone_config.set('backup','server', str(self.config['backup_server']))
-		drone_config.set('backup','user', str(self.config['backup_user']))
+		drone_config.set('backup','port',    str(self.json['backup_port']))
+		drone_config.set('backup','server',  self.config['backup_server'])
+		drone_config.set('backup','user',    self.config['backup_user'])
 
-		drone_config.set('puppet','user', self.config['ssh_puppet_user'])
-		drone_config.set('puppet','server', self.config['ssh_puppet_server'])
-		drone_config.set('puppet','binary', self.config['puppet_binary'])
+		drone_config.set('puppet','user',    self.config['ssh_puppet_user'])
+		drone_config.set('puppet','server',  self.config['ssh_puppet_server'])
+		drone_config.set('puppet','binary',  self.config['puppet_binary'])
 
 		drone_config.set('server','address', self.config['server_url'])
-		drone_config.set('server','verify', self.config['server_verify'])
+		drone_config.set('server','verify',  self.config['server_verify'])
 
 		try:
 			with open(self.config['base_dir'] + '/drone.conf', 'w') as f:
