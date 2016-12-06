@@ -21,7 +21,7 @@ import dmidecode
 import re
 
 class Bonemeal:
-	version       = '2016-11-23-03'
+	version       = '2016-12-06-01'
 
 	# [bonemeal]
 	config = {
@@ -427,6 +427,7 @@ class Bonemeal:
 
 		drone_config.set('server','address', self.config['server_url'])
 		drone_config.set('server','verify',  self.config['server_verify'])
+		drone_config.set('server','api_key', str(self.json['api_key']))
 
 		try:
 			with open(self.config['base_dir'] + '/drone.conf', 'w') as f:
