@@ -21,7 +21,7 @@ import dmidecode
 import re
 
 class Bonemeal:
-	version       = '2016-12-06-01'
+	version       = '2016-12-06-02'
 
 	# [bonemeal]
 	config = {
@@ -438,6 +438,14 @@ class Bonemeal:
 			return
 
 		self.add_msg("Saved drone configuration")
+
+		# Set perms on the drone config
+		try:
+			os.chmod(self.config['base_dir'] + '/drone.conf', 0600)
+
+		except Exception as ex:
+			self.fatal("Failed to change permissions on " + self.config['base_dir'] + "/drone.conf: \n" + str(type(ex)) + " - " + str(ex))
+			return 
 
 		# Create the directory for Puppet modules
 		if os.path.exists(self.config['base_dir'] + "/puppet"):
