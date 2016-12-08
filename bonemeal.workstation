@@ -21,7 +21,7 @@ import dmidecode
 import re
 
 class Bonemeal:
-	version       = '2016-12-06-02'
+	version       = '2016-12-08-01'
 
 	# [bonemeal]
 	config = {
@@ -77,6 +77,10 @@ class Bonemeal:
 			# Remove trailing slash on basedir
 			if self.config['base_dir'].endswith("/"):
 				self.config['base_dir'] = self.config['base_dir'][:-1]
+
+			# Ensure trailing slash on the server register URL
+			if not self.config['server_url'].endswith("/"):
+				self.config['server_url'] = self.config['server_url'] + "/"
 
 		except Exception as ex:
 			print "[bonemeal] Could not read from config file " + CONFIG_FILE + ": " + str(ex)
@@ -524,7 +528,7 @@ class Bonemeal:
 			pass
 
 		## reboot
-#		self.sysexec("/sbin/reboot")
+		self.sysexec("/sbin/reboot")
 
 		## exit (We probably never get this far)
 		raise urwid.ExitMainLoop()
@@ -563,7 +567,7 @@ class Bonemeal:
 
 		if distid == 'Maipo':
 			self.release = 7
-			self.ident   = 'el7s'
+			self.ident   = 'rhel7'
 			self.log.info("Detected operating system as RHEL7: " + distname + " " + distversion + " " + distid)
 			return True
 		else:
