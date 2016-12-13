@@ -21,7 +21,7 @@ import dmidecode
 import re
 
 class Bonemeal:
-	version       = '2016-12-08-01'
+	version       = '2016-12-13-01'
 
 	# [bonemeal]
 	config = {
@@ -68,7 +68,7 @@ class Bonemeal:
 
 			# load booleans in as a boolean if it is 'no', 'yes', 'True' or 'False'
 			try:
-				self.config['sslverify'] = configParser.getboolean('bonemeal','sslverify')
+				self.config['server_verify'] = configParser.getboolean('bonemeal','server_verify')
 			except ValueError as ex:
 				pass
 			except ConfigParser.NoOptionError as ex:
