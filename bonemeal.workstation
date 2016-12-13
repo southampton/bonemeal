@@ -21,7 +21,7 @@ import dmidecode
 import re
 
 class Bonemeal:
-	version       = '2016-12-13-01'
+	version       = '2016-12-13-02'
 
 	# [bonemeal]
 	config = {
@@ -484,6 +484,15 @@ class Bonemeal:
 
 		if code != 0:
 			self.fatal("An error occured whilst applying system policy: \n" + stdout + "\n" + stderr)
+			return
+
+		self.add_msg("Installing software updates")
+
+
+		(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y update",shell=True)
+
+		if code != 0:
+			self.fatal("An error occured whilst installing software updates: \n" + stdout + "\n" + stderr)
 			return
 
 		self.view_finish()
