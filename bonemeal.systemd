@@ -1,19 +1,14 @@
 [Unit]
 Description=Southampton Setup program
-After=livesys.service plymouth-quit-wait.service
 After=systemd-vconsole-setup.service
 Before=display-manager.service getty@tty1.service getty@ttyUSB0.service
 Before=serial-getty@ttyS0.service serial-getty@ttyO0.service serial-getty@ttyO2.service
 Before=serial-getty@ttyAMA0.service serial-getty@ttymxc0.service serial-getty@ttymxc3.service
-Conflicts=plymouth-quit-wait.service
 Conflicts=initial-setup-graphical.service
 Conflicts=initial-setup-text.service
-After=initial-setup-graphical.service
-ConditionKernelCommandLine=!rd.live.image
 
 [Service]
 Type=oneshot
-ExecStartPre=-/bin/plymouth quit
 ExecStartPre=/bin/kill -55 1
 ExecStart=/sbin/soton-setup
 ExecStartPost=/bin/kill -54 1
