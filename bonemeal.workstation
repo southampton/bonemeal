@@ -21,20 +21,24 @@ import dmidecode
 import re
 
 class Bonemeal:
-	version       = '2016-12-13-02'
+	version       = '2017-01-30-01'
 
 	# [bonemeal]
 	config = {
-		'title'         :    'Linux Desktop 7 Setup',
-		'log_file'      :    '/var/log/bonemeal.log',
-		'puppet_binary' :    '/opt/puppetlabs/bin/puppet',
-		'server_url'    :    'http://localhost:8000/',
-		'server_verify' :    False,
-		'ssh_puppet_user' :  'changeme',
+		'title'            :    'University of Southampton RHEL7 Desktop Setup',
+		'log_file'         :    '/var/log/bonemeal.log',
+		'puppet_binary'    :    '/opt/puppetlabs/bin/puppet',
+		'server_url'       :    'https://zero.yourdomain.tld/',
+		'server_verify'    :    False,
+		'ssh_puppet_user'  :  'changeme',
 		'ssh_puppet_server': 'changeme',
-		'ssh_backup_user':   'changeme',
+		'ssh_backup_user'  :   'changeme',
 		'ssh_backup_server': 'changeme',
-		'base_dir':          '/etc/soton', #should not end with a slash!
+		'reskit_pkgdir'    : '/etc/reskit/packages',
+		'reskit_server'    : 'reskit.yourdomain.tld',
+		'reskit_share'     : 'reskit',
+		'csw_server'       : 'csw.yourdomain.tld',
+		'base_dir'         : '/etc/soton', 
 	}
 
 	## colour setup
@@ -421,6 +425,9 @@ class Bonemeal:
 		drone_config.add_section('backup')
 		drone_config.add_section('puppet')
 		drone_config.add_section('server')
+		drone_config.add_section('reskit')
+		drone_config.add_section('csw')
+
 		drone_config.set('backup','port',    str(self.json['backup_port']))
 		drone_config.set('backup','server',  self.config['ssh_backup_server'])
 		drone_config.set('backup','user',    self.config['ssh_backup_user'])
@@ -432,6 +439,12 @@ class Bonemeal:
 		drone_config.set('server','address', self.config['server_url'])
 		drone_config.set('server','verify',  self.config['server_verify'])
 		drone_config.set('server','api_key', str(self.json['api_key']))
+
+		drone_config.set('reskit','pkgdir', self.config['reskit_pkgdir'])
+		drone_config.set('reskit','server', self.config['reskit_server'])
+		drone_config.set('reskit','share', self.config['reskit_share'])
+
+		drone_config.set('csw','server', self.config['csw_server'])
 
 		try:
 			with open(self.config['base_dir'] + '/drone.conf', 'w') as f:
