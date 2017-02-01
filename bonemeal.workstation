@@ -21,18 +21,18 @@ import dmidecode
 import re
 
 class Bonemeal:
-	version       = '2017-01-30-01'
+	version       = '2017-02-01-01'
 
 	# [bonemeal]
 	config = {
-		'title'            :    'University of Southampton RHEL7 Desktop Setup',
-		'log_file'         :    '/var/log/bonemeal.log',
-		'puppet_binary'    :    '/opt/puppetlabs/bin/puppet',
-		'server_url'       :    'https://zero.yourdomain.tld/',
-		'server_verify'    :    False,
-		'ssh_puppet_user'  :  'changeme',
+		'title'            : 'University of Southampton RHEL7 Desktop Setup',
+		'log_file'         : '/var/log/bonemeal.log',
+		'puppet_binary'    : '/opt/puppetlabs/bin/puppet',
+		'server_url'       : 'https://zero.yourdomain.tld/',
+		'server_verify'    : False,
+		'ssh_puppet_user'  : 'changeme',
 		'ssh_puppet_server': 'changeme',
-		'ssh_backup_user'  :   'changeme',
+		'ssh_backup_user'  : 'changeme',
 		'ssh_backup_server': 'changeme',
 		'reskit_pkgdir'    : '/etc/reskit/packages',
 		'reskit_server'    : 'reskit.yourdomain.tld',
@@ -489,19 +489,22 @@ class Bonemeal:
 
 		self.add_msg("Applying Puppet rules")
 
-		## We run this twice because: Puppet
-		## We only care about the output of the second command
+		## We run this three times because: Puppet
+		## We only care about the output of the third command
 
 		(code, stdout, stderr) = self.sysexec("""%s apply --detailed-exitcodes --modulepath %s/puppet/modules/ %s/puppet/manifests/site.pp""" % (self.config['puppet_binary'],self.config['base_dir'],self.config['base_dir']),shell=True)
 		(code, stdout, stderr) = self.sysexec("""%s apply --detailed-exitcodes --modulepath %s/puppet/modules/ %s/puppet/manifests/site.pp""" % (self.config['puppet_binary'],self.config['base_dir'],self.config['base_dir']),shell=True)
+		(code, stdout, stderr) = self.sysexec("""%s apply --detailed-exitcodes --modulepath %s/puppet/modules/ %s/puppet/manifests/site.pp""" % (self.config['puppet_binary'],self.config['base_dir'],self.config['base_dir']),shell=True)
 
-		if code != 0:
+		## 1: failed
+		## 2: success, some resources changed
+		## 4: success, but some resources failed (so, fail)
+		## 6: success, but some resources changed and others failed (so, fail)
+		if code == 1 or code == 4 or code == 6:
 			self.fatal("An error occured whilst applying system policy: \n" + stdout + "\n" + stderr)
 			return
 
 		self.add_msg("Installing software updates")
-
-
 		(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y update",shell=True)
 
 		if code != 0:
