@@ -21,7 +21,7 @@ import dmidecode
 import re
 
 class Bonemeal:
-	version       = '2017-02-01-01'
+	version       = '2017-02-11-01'
 
 	# [bonemeal]
 	config = {
@@ -510,6 +510,53 @@ class Bonemeal:
 		if code != 0:
 			self.fatal("An error occured whilst installing software updates: \n" + stdout + "\n" + stderr)
 			return
+
+		## we set the theme here, rather than via puppet, because we need to
+		## rebuild the initrd/initramfs. 
+		self.add_msg("Setting plymouth theme to text")
+		(code, stdout, stderr) = self.sysexec("/sbin/plymouth-set-default-theme -R text",shell=True)
+
+		if code != 0:
+			self.fatal("An error occured changing the plymouth theme: \n" + stdout + "\n" + stderr)
+			return
+
+		## Attempt to detect if we're on a nvidia graphics card system, and if so,
+		## we should set the boot options "plymouth.ignore-udev" so that 
+		## plymouth doesn't ask udev for graphics cards and instead just uses 
+		## a text output because even though NVIDIA exposes a drm driver it does
+		## not work and so we force plymouth to ignore it
+		##
+		## the puppet stage /should/ have installed the nvidia-detect
+		## package, so we'll use that to detect if we're on nvidia, and if we are
+		## we will add the flag to /etc/default/grub. All these sections 
+		## fail gracefully (e.g. if anything goes wrong it isnt classed as a
+		## fatal error)
+		if os.path.exists("/usr/bin/nvidia-detect"):
+
+			self.add_msg("Checking for a NVIDIA graphics card")
+			(code, stdout, stderr) = self.sysexec(["/usr/bin/nvidia-detect"])
+
+			# nvidia-detect outputs these codes if a nvidia card was found
+			if code in [1,2,3,4,5]:
+				self.add_msg("Setting plymouth options for NVIDIA")
+
+				try:
+					with open("/etc/default/grub","r+") as grubfp:
+						grub = grubfp.read()
+
+						## Change the boot options
+						grub = grub.replace('GRUB_CMDLINE_LINUX="','GRUB_CMDLINE_LINUX="plymouth.ignore-udev ')
+
+						grubfp.seek(0)
+						grubfp.write(grub)
+
+					self.add_msg("Rebuilding the GRUB config file")
+					(code, stdout, stderr) = self.sysexec(["/usr/sbin/grub2-mkconfig","-o","/boot/grub2/grub.cfg"])
+					if code != 0:
+						self.add_msg("An error occured whilst rebuilding the grub config file")
+
+				except Exception as ex:
+					self.add_msg("Failed to set plymouth boot options: " + str(type(ex)) + " - " + str(ex))
 
 		self.view_finish()
 
