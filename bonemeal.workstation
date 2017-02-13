@@ -22,7 +22,7 @@ import re
 from multiprocessing import Process, Manager
 
 class Bonemeal:
-	version       = '2017-02-13-02'
+	version       = '2017-02-13-03'
 
 	# [bonemeal]
 	config = {
@@ -45,7 +45,7 @@ class Bonemeal:
 	## colour setup
 	palette = [
 		('edit', 'black', 'light gray'),
-		('header', 'black', 'white', 'bold'),
+		('header', 'white', 'dark red', 'bold'),
 		('label', 'white', 'dark blue', 'bold'),
 		('bg', 'white', 'dark blue'),
 		('error', 'yellow', 'dark blue')
@@ -216,6 +216,10 @@ class Bonemeal:
 		self.worker_spinner.set_text(txt)
 		self.loop.draw_screen()
 		self.loop.set_alarm_in(0.1,self.on_loop_callback)
+
+	def on_loop_refresh(self,loop=None,ud=None):
+		self.loop.draw_screen()
+		self.loop.set_alarm_in(0.3,self.on_loop_refresh)
 
 ################################################################################
 ## INTERACTIVE MODE
@@ -642,6 +646,11 @@ class Bonemeal:
 		frame = urwid.Frame(header=self.header, body=pile1, footer=self.footer)
 		self.switch_view(urwid.AttrMap(frame, 'bg'))
 
+		## refresh the screen every so often to prevent systemd from ballsing 
+		## up the output like it pretty much always does by logging to the 
+		## console
+		self.on_loop_refresh()
+
 ################################################################################
 
 	def exit_installer(self):
@@ -680,6 +689,11 @@ class Bonemeal:
 		fill = urwid.Filler(pile, 'top')
 		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
 		self.switch_view(urwid.AttrMap(frame, 'bg'))
+
+		## refresh the screen every so often to prevent systemd from ballsing 
+		## up the output like it pretty much always does by logging to the 
+		## console
+		self.on_loop_refresh()
 
 ################################################################################
 ## Detect OS version
