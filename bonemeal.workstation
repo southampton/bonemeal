@@ -22,7 +22,7 @@ import re
 from multiprocessing import Process, Manager
 
 class Bonemeal:
-	version       = '2017-02-13-01'
+	version       = '2017-02-13-02'
 
 	# [bonemeal]
 	config = {
@@ -562,21 +562,24 @@ class Bonemeal:
 		if code == 1 or code == 4 or code == 6:
 			return self.worker_fatal("An error occured whilst applying system policy: \n" + output)
 
-		shared['display'] = "Installing software updates"
-		self.log.info("Installing software updates")
-		(code, output) = self.sysexec("/usr/bin/yum -y update",shell=True)
-
-		if code != 0:
-			return self.worker_fatal("An error occured whilst installing software updates: \n" + output)
-
 		## we set the theme here, rather than via puppet, because we need to
-		## rebuild the initrd/initramfs. 
+		## rebuild the initrd/initramfs. also we have to set it /before/
+		## software updates, otherwise dracut helpfully updates initramfs for
+		## the current kernel only, and not any installed which are newer which
+		## we haven't booted into yet. 
 		shared['display'] = "Updating boot screen"
 		self.log.info("Setting plymouth theme to text")
 		(code, output) = self.sysexec("/sbin/plymouth-set-default-theme -R text",shell=True)
 
 		if code != 0:
 			return self.worker_fatal("An error occured changing the plymouth theme: \n" + output)
+
+		shared['display'] = "Installing software updates"
+		self.log.info("Installing software updates")
+		(code, output) = self.sysexec("/usr/bin/yum -y update",shell=True)
+
+		if code != 0:
+			return self.worker_fatal("An error occured whilst installing software updates: \n" + output)
 
 		## Attempt to detect if we're on a nvidia graphics card system, and if so,
 		## we should set the boot options "plymouth.ignore-udev" so that 
