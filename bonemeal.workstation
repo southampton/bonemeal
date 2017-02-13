@@ -19,9 +19,10 @@ import sys
 import termios
 import dmidecode
 import re
+from multiprocessing import Process, Manager
 
 class Bonemeal:
-	version       = '2017-02-11-01'
+	version       = '2017-02-13-01'
 
 	# [bonemeal]
 	config = {
@@ -44,7 +45,7 @@ class Bonemeal:
 	## colour setup
 	palette = [
 		('edit', 'black', 'light gray'),
-		('header', 'white', 'dark red', 'bold'),
+		('header', 'black', 'white', 'bold'),
 		('label', 'white', 'dark blue', 'bold'),
 		('bg', 'white', 'dark blue'),
 		('error', 'yellow', 'dark blue')
@@ -53,6 +54,11 @@ class Bonemeal:
 	## state handling for unhandled input
 	start   = True
 	finish  = False
+
+	## worker process status constants
+	STATUS_NOT_STARTED = 0
+	STATUS_IN_PROGRESS = 1
+	STATUS_FINISHED    = 2
 
 ################################################################################
 
@@ -118,12 +124,6 @@ class Bonemeal:
 
 ################################################################################
 
-	def fatal(self,message):
-		self.log.critical("fatal error: " + message)
-		self.view_fatal_error(message)
-
-################################################################################
-
 	def switch_view(self,view):
 		self.loop.widget = view
 		self.loop.draw_screen()
@@ -161,15 +161,61 @@ class Bonemeal:
 		try:
 			proc = subprocess.Popen(command,stdout=subprocess.PIPE, stderr=subprocess.STDOUT,shell=shell)
 			(stdoutdata, stderrdata) = proc.communicate()
-			return (proc.returncode,str(stdoutdata),str(stderrdata))
+			return (proc.returncode,str(stdoutdata))
 		except Exception as ex:
 			self.log.error("command generated an exception: " + type(ex).__name__ + ": " + str(ex))
-			return (1,"",str(ex))
+			return (1,str(ex))
 
 ################################################################################
 
 	def handle_exit(self,button=None):
 		raise urwid.ExitMainLoop()
+
+################################################################################
+
+	def start_monitor_loop(self):
+		self.forward = True
+		self.current_pos = 2
+		self.on_loop_callback()
+
+	def on_loop_callback(self,loop=None,ud=None):
+
+		if self.shared['status'] == self.STATUS_IN_PROGRESS:
+			self.worker_text.set_text(self.shared['display'])
+		elif self.shared['status'] == self.STATUS_FINISHED:
+			if self.shared['error']:
+				self.log.info("worker process generated an error")
+				self.view_fatal_error(self.shared['display'])
+				return
+			else:
+				self.log.info("worker process finished without error")
+				self.view_finish()
+				return
+
+		if self.current_pos == -1:
+			return
+
+		if self.current_pos == 10:
+			self.forward = False
+		elif self.current_pos == 1:
+			self.forward = True
+
+		if self.forward:
+			self.current_pos = self.current_pos + 1
+		else:
+			self.current_pos = self.current_pos - 1
+
+		txt = ""
+		for pos in range(1,11):
+			if pos == self.current_pos:
+				txt = txt + "-"
+			else:
+				txt = txt + " "
+
+
+		self.worker_spinner.set_text(txt)
+		self.loop.draw_screen()
+		self.loop.set_alarm_in(0.1,self.on_loop_callback)
 
 ################################################################################
 ## INTERACTIVE MODE
@@ -178,7 +224,7 @@ class Bonemeal:
 		div   = urwid.Divider()
 		bt    = urwid.BigText('I am ready to build', font=urwid.font.HalfBlock5x4Font())
 		btwp  = urwid.Padding(bt, "center", 'clip')
-		txt   = urwid.Text(u"Press any key to set up your new computer",align='center')
+		txt   = urwid.Text(u"Press any key to set up this computer",align='center')
 
 		pile1 = urwid.Pile([btwp,div,txt])
 		pile1 = urwid.Filler(pile1, 'middle', None, 7)
@@ -303,13 +349,14 @@ class Bonemeal:
 					self.auth_error.set_text(self.json['reason'])
 				else:
 					self.log.info("registration successful")
-					self.view_go()
-					#self.auth_error.set_text("yeah: \n" + self.json['private_key'] + "\n" + "\n" + self.json['public_key'])
 
 			except Exception as ex:
 				self.log.error("failed to parse response from registration server: " + type(ex).__name__ + ": " + str(ex))
 				self.auth_error.set_text("Failed to understand return response: " + type(ex).__name__ + ": " + str(ex))
 				return
+
+			## Start the installation
+			self.view_go()
 
 		else:
 			self.log.error("unexpected return code from registration server: " + str(r.status_code))
@@ -319,53 +366,73 @@ class Bonemeal:
 ## DO INSTALL
 
 	def view_go(self):
-		div = urwid.Divider()
+		div   = urwid.Divider()
+		self.worker_spinner = urwid.BigText('', font=urwid.font.HalfBlock7x7Font())
+		spinner_padded = urwid.Padding(self.worker_spinner, "center", 'clip')
+		self.worker_text = urwid.Text(u"Please wait...",align='center')
 
-		self.msgs = urwid.SimpleFocusListWalker([urwid.Text(" ",align='left'),urwid.Text(" Please wait whilst I set up the computer:",align='left')])
-		self.msgs_box = urwid.ListBox(self.msgs)
+		pile1 = urwid.Pile([spinner_padded,div,self.worker_text])
+		pile1 = urwid.Filler(pile1, 'middle', None, 7)
+		frame = urwid.Frame(header=self.header, body=pile1, footer=self.footer)
 
-		frame = urwid.Frame(header=self.header, body=self.msgs_box, footer=self.footer)
+#		div = urwid.Divider()
+
+#		self.msgs = urwid.SimpleFocusListWalker([urwid.Text(" ",align='left'),urwid.Text(" Please wait whilst I set up the computer:",align='left')])
+#		self.msgs_box = urwid.ListBox(self.msgs)
+
+#		frame = urwid.Frame(header=self.header, body=self.msgs_box, footer=self.footer)
 		self.switch_view(urwid.AttrMap(frame, 'bg'))
 
-		## now do the install
-		self.configure()
+		## set up manager to share state between the worker process
+		## and the main process (the process we're in)
+		self.manager           = Manager()
+		self.shared            = self.manager.dict()
+		self.shared['status']  = self.STATUS_NOT_STARTED
+		self.shared['display'] = "Starting installation..."
+		self.shared['error']   = False
+
+		## start the worker process to do the install
+		self.worker = Process(target=self.worker_func, args=(self.shared,))
+		self.worker.start()
+
+		## start the checking/drawing loop 
+		self.start_monitor_loop()
 
 ################################################################################
 
-	def add_msg(self,message):
-		self.log.info(message)
-		self.msgs.append(urwid.Text(" " + message.rstrip(),align='left'))
-		self.msgs_box.set_focus(len(self.msgs) -1)
-		self.loop.draw_screen()
+	def worker_fatal(self,errstr,shared):
+		self.log.critical("fatal error: " + errstr)
+		shared['error']   = True
+		shared['display'] = errstr
+		shared['status']  = self.STATUS_FINISHED
 
 ################################################################################
 
-	def configure(self, loop=None, user_data=None):
-		self.warnings = 0
+	def worker_func(self, shared):
+		shared['status'] = self.STATUS_IN_PROGRESS
 
 		## 1. HOSTNAME #########################################################
-		(code, stdout, stderr) = self.sysexec(["/bin/hostnamectl","set-hostname",self.hostname])
+		shared['display'] = "Setting hostname"
+		(code, output) = self.sysexec(["/bin/hostnamectl","set-hostname",self.hostname])
 
 		if code != 0:
-			self.fatal("Setting hostname failed: \n" + stdout + "\n" + stderr)
-			return
+			return self.worker_fatal("Setting hostname failed: \n" + output)
 		else:
-			self.add_msg("Hostname set to '" + self.hostname + "'")
+			self.log.info("Hostname set to '" + self.hostname + "'")
 
 		## 2. SAVE SSH KEY PAIR ################################################
+		shared['display'] = "Saving drone configuration"
 		# Create the directory
 		if os.path.exists(self.config['base_dir']):
 			if not os.path.isdir(self.config['base_dir']):
-				self.fatal("The path " + self.config['base_dir'] + " exists but it is not a directory")
-				return
+				return self.worker_fatal("The path " + self.config['base_dir'] + " exists but it is not a directory")
 		else:
 			try:
 				os.mkdir(self.config['base_dir'])
 			except Exception as ex: 
-				self.fatal("Failed to create directory " + self.config['base_dir'] + ": \n" + str(type(ex)) + " - " + str(ex))
-				return
+				return self.worker_fatal("Failed to create directory " + self.config['base_dir'] + ": \n" + str(type(ex)) + " - " + str(ex))
 
-		self.add_msg("Created " + self.config['base_dir'])
+		self.log.info("Created " + self.config['base_dir'])
 
 		# Save the SSH public key
 		try:
@@ -374,10 +441,9 @@ class Bonemeal:
 				f.write("\n")
 
 		except Exception as ex:
-			self.fatal("Failed to write to " + self.config['base_dir'] + "/ssh_public_key: \n" + str(type(ex)) + " - " + str(ex))
-			return
+			return self.worker_fatal("Failed to write to " + self.config['base_dir'] + "/ssh_public_key: \n" + str(type(ex)) + " - " + str(ex))
 
-		self.add_msg("Saved the SSH public key")
+		self.log.info("Saved the SSH public key")
 
 		# Save the SSH private key
 		try:
@@ -385,20 +451,18 @@ class Bonemeal:
 				f.write(self.json['private_key'])
 
 		except Exception as ex:
-			self.fatal("Failed to write to " + self.config['base_dir'] + "/ssh_private_key: \n" + str(type(ex)) + " - " + str(ex))
-			return
+			return self.worker_fatal("Failed to write to " + self.config['base_dir'] + "/ssh_private_key: \n" + str(type(ex)) + " - " + str(ex))
 
-		self.add_msg("Saved the SSH private key")
+		self.log.info("Saved the SSH private key")
 
 		# Set perms on the key
 		try:
 			os.chmod(self.config['base_dir'] + '/ssh_private_key', 0600)
 
 		except Exception as ex:
-			self.fatal("Failed to change permissions on " + self.config['base_dir'] + "/ssh_private_key: \n" + str(type(ex)) + " - " + str(ex))
-			return
+			return self.worker_fatal("Failed to change permissions on " + self.config['base_dir'] + "/ssh_private_key: \n" + str(type(ex)) + " - " + str(ex))
 
-		self.add_msg("Set permissions on the private key")
+		self.log.info("Set permissions on the private key")
 
 		# Save the backup key (for rsyncd)
 		try:
@@ -406,119 +470,113 @@ class Bonemeal:
 				f.write("backup:" + self.json['backup_key'] + "\n")
 
 		except Exception as ex:
-			self.fatal("Failed to write to " + self.config['base_dir'] + "/backup_key: \n" + str(type(ex)) + " - " + str(ex))
-			return
+			return self.worker_fatal("Failed to write to " + self.config['base_dir'] + "/backup_key: \n" + str(type(ex)) + " - " + str(ex))
 
-		self.add_msg("Saved the backup key")
+		self.log.info("Saved the backup key")
 
 		# Set perms on the key
 		try:
 			os.chmod(self.config['base_dir'] + '/backup_key', 0600)
 
 		except Exception as ex:
-			self.fatal("Failed to change permissions on " + self.config['base_dir'] + "/backup_key: \n" + str(type(ex)) + " - " + str(ex))
-			return 
+			return self.worker_fatal("Failed to change permissions on " + self.config['base_dir'] + "/backup_key: \n" + str(type(ex)) + " - " + str(ex))
 
-		self.add_msg("Set permissions on the backup key")
-
-		drone_config = ConfigParser.RawConfigParser()
-		drone_config.add_section('backup')
-		drone_config.add_section('puppet')
-		drone_config.add_section('server')
-		drone_config.add_section('reskit')
-		drone_config.add_section('csw')
-
-		drone_config.set('backup','port',    str(self.json['backup_port']))
-		drone_config.set('backup','server',  self.config['ssh_backup_server'])
-		drone_config.set('backup','user',    self.config['ssh_backup_user'])
-
-		drone_config.set('puppet','user',    self.config['ssh_puppet_user'])
-		drone_config.set('puppet','server',  self.config['ssh_puppet_server'])
-		drone_config.set('puppet','binary',  self.config['puppet_binary'])
-
-		drone_config.set('server','address', self.config['server_url'])
-		drone_config.set('server','verify',  self.config['server_verify'])
-		drone_config.set('server','api_key', str(self.json['api_key']))
-
-		drone_config.set('reskit','pkgdir', self.config['reskit_pkgdir'])
-		drone_config.set('reskit','server', self.config['reskit_server'])
-		drone_config.set('reskit','share', self.config['reskit_share'])
-
-		drone_config.set('csw','server', self.config['csw_server'])
+		self.log.info("Set permissions on the backup key")
 
 		try:
+			drone_config = ConfigParser.RawConfigParser()
+			drone_config.add_section('backup')
+			drone_config.add_section('puppet')
+			drone_config.add_section('server')
+			drone_config.add_section('reskit')
+			drone_config.add_section('csw')
+
+			drone_config.set('backup','port',    str(self.json['backup_port']))
+			drone_config.set('backup','server',  self.config['ssh_backup_server'])
+			drone_config.set('backup','user',    self.config['ssh_backup_user'])
+
+			drone_config.set('puppet','user',    self.config['ssh_puppet_user'])
+			drone_config.set('puppet','server',  self.config['ssh_puppet_server'])
+			drone_config.set('puppet','binary',  self.config['puppet_binary'])
+
+			drone_config.set('server','address', self.config['server_url'])
+			drone_config.set('server','verify',  self.config['server_verify'])
+			drone_config.set('server','api_key', str(self.json['api_key']))
+
+			drone_config.set('reskit','pkgdir', self.config['reskit_pkgdir'])
+			drone_config.set('reskit','server', self.config['reskit_server'])
+			drone_config.set('reskit','share', self.config['reskit_share'])
+
+			drone_config.set('csw','server', self.config['csw_server'])
+
 			with open(self.config['base_dir'] + '/drone.conf', 'w') as f:
 				drone_config.write(f)
 	
 		except Exception as ex:
-			self.fatal("Failed to write to " + self.config['base_dir'] + "/drone.conf: \n" + str(type(ex)) + " - " + str(ex))
-			return
+			return self.worker_fatal("Failed to write to " + self.config['base_dir'] + "/drone.conf: \n" + str(type(ex)) + " - " + str(ex))
 
-		self.add_msg("Saved drone configuration")
+		self.log.info("Saved drone configuration")
 
 		# Set perms on the drone config
 		try:
 			os.chmod(self.config['base_dir'] + '/drone.conf', 0600)
 
 		except Exception as ex:
-			self.fatal("Failed to change permissions on " + self.config['base_dir'] + "/drone.conf: \n" + str(type(ex)) + " - " + str(ex))
-			return 
+			return self.worker_fatal("Failed to change permissions on " + self.config['base_dir'] + "/drone.conf: \n" + str(type(ex)) + " - " + str(ex))
 
 		# Create the directory for Puppet modules
 		if os.path.exists(self.config['base_dir'] + "/puppet"):
 			if not os.path.isdir(self.config['base_dir'] + "/puppet"):
-				self.fatal("The path " + self.config['base_dir'] + "/puppet exists but it is not a directory")
-				return
+				return self.worker_fatal("The path " + self.config['base_dir'] + "/puppet exists but it is not a directory")
 		else:
 			try:
 				os.mkdir(self.config['base_dir'] + "/puppet")
 			except Exception as ex: 
-				self.fatal("Failed to create directory " + self.config['base_dir'] + "/puppet: \n" + str(type(ex)) + " - " + str(ex))
-				return
+				return self.worker_fatal("Failed to create directory " + self.config['base_dir'] + "/puppet: \n" + str(type(ex)) + " - " + str(ex))
 
-		self.add_msg("Created " + self.config['base_dir'] + "/puppet")
+		self.log.info("Created " + self.config['base_dir'] + "/puppet")
 
 		## Now we download the puppet modules over rsync+ssh
-		self.add_msg("Downloading Puppet modules into " + self.config['base_dir'] + "/puppet")
+		shared['display'] = "Downloading system policy"
+		self.log.info("Downloading Puppet modules into " + self.config['base_dir'] + "/puppet")
 
-		(code, stdout, stderr) = self.sysexec("""/usr/bin/rsync -e "ssh -i %s/ssh_private_key -o PreferredAuthentications=publickey -oStrictHostKeyChecking=no" -av --delete %s@%s: %s/puppet/""" % (self.config['base_dir'], self.config['ssh_puppet_user'],self.config['ssh_puppet_server'],self.config['base_dir'],),shell=True)
+		(code, output) = self.sysexec("""/usr/bin/rsync -e "ssh -i %s/ssh_private_key -o PreferredAuthentications=publickey -oStrictHostKeyChecking=no" -av --delete %s@%s: %s/puppet/""" % (self.config['base_dir'], self.config['ssh_puppet_user'],self.config['ssh_puppet_server'],self.config['base_dir'],),shell=True)
 
 		if code != 0:
-			self.fatal("Could not download Puppet modules: \n" + stdout + "\n" + stderr)
-			return
+			return self.worker_fatal("Could not download system policy: \n" + output)
 
-		self.add_msg("Applying Puppet rules")
+		shared['display'] = "Applying system policy"
+		self.log.info("Applying Puppet rules")
 
 		## We run this three times because: Puppet
-		## We only care about the output of the third command
+		## We only care about the output of the final command
 
-		(code, stdout, stderr) = self.sysexec("""%s apply --detailed-exitcodes --modulepath %s/puppet/modules/ %s/puppet/manifests/site.pp""" % (self.config['puppet_binary'],self.config['base_dir'],self.config['base_dir']),shell=True)
-		(code, stdout, stderr) = self.sysexec("""%s apply --detailed-exitcodes --modulepath %s/puppet/modules/ %s/puppet/manifests/site.pp""" % (self.config['puppet_binary'],self.config['base_dir'],self.config['base_dir']),shell=True)
-		(code, stdout, stderr) = self.sysexec("""%s apply --detailed-exitcodes --modulepath %s/puppet/modules/ %s/puppet/manifests/site.pp""" % (self.config['puppet_binary'],self.config['base_dir'],self.config['base_dir']),shell=True)
+		(code, output) = self.sysexec("""%s apply --detailed-exitcodes --modulepath %s/puppet/modules/ %s/puppet/manifests/site.pp""" % (self.config['puppet_binary'],self.config['base_dir'],self.config['base_dir']),shell=True)
+		(code, output) = self.sysexec("""%s apply --detailed-exitcodes --modulepath %s/puppet/modules/ %s/puppet/manifests/site.pp""" % (self.config['puppet_binary'],self.config['base_dir'],self.config['base_dir']),shell=True)
+		(code, output) = self.sysexec("""%s apply --detailed-exitcodes --modulepath %s/puppet/modules/ %s/puppet/manifests/site.pp""" % (self.config['puppet_binary'],self.config['base_dir'],self.config['base_dir']),shell=True)
 
 		## 1: failed
 		## 2: success, some resources changed
 		## 4: success, but some resources failed (so, fail)
 		## 6: success, but some resources changed and others failed (so, fail)
 		if code == 1 or code == 4 or code == 6:
-			self.fatal("An error occured whilst applying system policy: \n" + stdout + "\n" + stderr)
-			return
+			return self.worker_fatal("An error occured whilst applying system policy: \n" + output)
 
-		self.add_msg("Installing software updates")
-		(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y update",shell=True)
+		shared['display'] = "Installing software updates"
+		self.log.info("Installing software updates")
+		(code, output) = self.sysexec("/usr/bin/yum -y update",shell=True)
 
 		if code != 0:
-			self.fatal("An error occured whilst installing software updates: \n" + stdout + "\n" + stderr)
-			return
+			return self.worker_fatal("An error occured whilst installing software updates: \n" + output)
 
 		## we set the theme here, rather than via puppet, because we need to
 		## rebuild the initrd/initramfs. 
-		self.add_msg("Setting plymouth theme to text")
-		(code, stdout, stderr) = self.sysexec("/sbin/plymouth-set-default-theme -R text",shell=True)
+		shared['display'] = "Updating boot screen"
+		self.log.info("Setting plymouth theme to text")
+		(code, output) = self.sysexec("/sbin/plymouth-set-default-theme -R text",shell=True)
 
 		if code != 0:
-			self.fatal("An error occured changing the plymouth theme: \n" + stdout + "\n" + stderr)
-			return
+			return self.worker_fatal("An error occured changing the plymouth theme: \n" + output)
 
 		## Attempt to detect if we're on a nvidia graphics card system, and if so,
 		## we should set the boot options "plymouth.ignore-udev" so that 
@@ -533,33 +591,34 @@ class Bonemeal:
 		## fatal error)
 		if os.path.exists("/usr/bin/nvidia-detect"):
 
-			self.add_msg("Checking for a NVIDIA graphics card")
-			(code, stdout, stderr) = self.sysexec(["/usr/bin/nvidia-detect"])
+			shared['display'] = "Checking for a NVIDIA graphics card"
+			self.log.info("Checking for a NVIDIA graphics card")
+			(code, output) = self.sysexec(["/usr/bin/nvidia-detect"])
 
 			# nvidia-detect outputs these codes if a nvidia card was found
 			if code in [1,2,3,4,5]:
-				self.add_msg("Setting plymouth options for NVIDIA")
+				self.log.info("Setting plymouth options for NVIDIA")
 
 				try:
 					with open("/etc/default/grub","r+") as grubfp:
 						grub = grubfp.read()
 
 						## Change the boot options
-						grub = grub.replace('GRUB_CMDLINE_LINUX="','GRUB_CMDLINE_LINUX="plymouth.ignore-udev ')
+						if "plymouth.ignore-udev" not in grub:
+							shared['display'] = "Rebuilding the boot loader configuration"
+							grub = grub.replace('GRUB_CMDLINE_LINUX="','GRUB_CMDLINE_LINUX="plymouth.ignore-udev ')
+							grubfp.seek(0)
+							grubfp.write(grub)
 
-						grubfp.seek(0)
-						grubfp.write(grub)
-
-					self.add_msg("Rebuilding the GRUB config file")
-					(code, stdout, stderr) = self.sysexec(["/usr/sbin/grub2-mkconfig","-o","/boot/grub2/grub.cfg"])
-					if code != 0:
-						self.add_msg("An error occured whilst rebuilding the grub config file")
+						self.log.info("Rebuilding the GRUB config file")
+						(code, output) = self.sysexec(["/usr/sbin/grub2-mkconfig","-o","/boot/grub2/grub.cfg"])
+						if code != 0:
+							self.log.info("An error occured whilst rebuilding the grub config file")
 
 				except Exception as ex:
-					self.add_msg("Failed to set plymouth boot options: " + str(type(ex)) + " - " + str(ex))
+					self.log.info("Failed to set plymouth boot options: " + str(type(ex)) + " - " + str(ex))
 
-		self.view_finish()
-
+		shared['status']  = self.STATUS_FINISHED
 
 ################################################################################
 ## FINISH SCREEN
@@ -568,25 +627,15 @@ class Bonemeal:
 		self.finish = True
 
 		## clear standard input so if the user pressed buttons during the install script, clear them away
-		termios.tcflush(sys.stdin,termios.TCIOFLUSH)
+		#termios.tcflush(sys.stdin,termios.TCIOFLUSH)
 
 		div = urwid.Divider()
-		bt = urwid.BigText('all done!', font=urwid.font.HalfBlock5x4Font())
-		btwp = urwid.Padding(bt, "center", 'clip')
+		donetext = urwid.BigText('all done!', font=urwid.font.HalfBlock5x4Font())
+		donetext_padded = urwid.Padding(donetext, "center", 'clip')
 
-		txt = urwid.Text(u"Press any key to restart",align='center')
-
-		if self.warnings == 0:
-			pile1 = urwid.Pile([btwp,div,txt])
-		elif self.warnings == 1:
-			warn = urwid.Text("One warning was detected during installation. \nPlease review " + self.config['log_file'] + " on reboot to check these warnings.",align='center')
-			pile1 = urwid.Pile([btwp,div,txt,div,warn])
-		else:
-			warn = urwid.Text(str(self.warnings) + u" warnings were encountered during installation.\n Please review " + self.config['log_file'] + " on reboot to check these warnings.",align='center')
-			pile1 = urwid.Pile([btwp,div,txt,div,warn])
-
+		dtxt = urwid.Text(u"Press any key to restart",align='center')
+		pile1 = urwid.Pile([donetext_padded,div,dtxt])
 		pile1 = urwid.Filler(pile1, 'middle', None, 7)
-
 		frame = urwid.Frame(header=self.header, body=pile1, footer=self.footer)
 		self.switch_view(urwid.AttrMap(frame, 'bg'))
 
@@ -610,11 +659,11 @@ class Bonemeal:
 
 	def view_fatal_error(self,message):
 		## clear standard input so if the user pressed buttons during the install script, clear them away
-		termios.tcflush(sys.stdin,termios.TCIOFLUSH)
+		#termios.tcflush(sys.stdin,termios.TCIOFLUSH)
 
 		div = urwid.Divider()
 
-		bt = urwid.BigText('uh oh...', font=urwid.font.HalfBlock5x4Font())
+		bt = urwid.BigText('fatal error', font=urwid.font.HalfBlock7x7Font())
 		btwp = urwid.Padding(bt, "center", 'clip')
 		htxt = urwid.Text(u"A fatal error occured:",align='left')
 		mtxt = urwid.Text(message,align='left')
