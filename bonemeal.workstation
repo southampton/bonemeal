@@ -625,6 +625,16 @@ class Bonemeal:
 				except Exception as ex:
 					self.log.info("Failed to set plymouth boot options: " + str(type(ex)) + " - " + str(ex))
 
+		## Finally we use drone (which we deployed earlier via puppet)
+		## to send to the LDI server updated metadata + facts
+		## if it fails, we don't care that much. It gets updated on
+		## cron anyway
+		shared['display'] = "Sending system information to the LDI server"
+		self.log.info("Running drone ldi metadata")
+		self.sysexec("/sbin/drone ldi metadata",shell=True)
+		self.log.info("Running drone ldi facts")
+		self.sysexec("/sbin/drone ldi facts",shell=True)
+
 		shared['status']  = self.STATUS_FINISHED
 
 ################################################################################
