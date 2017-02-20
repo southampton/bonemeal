@@ -22,7 +22,7 @@ import re
 from multiprocessing import Process, Manager
 
 class Bonemeal:
-	version       = '2017-02-14-01'
+	version       = '2017-02-20-01'
 
 	# [bonemeal]
 	config = {
@@ -351,6 +351,7 @@ class Bonemeal:
 				if 'error' in self.json:
 					self.log.error("registration server returned an error: " + self.json['reason'])
 					self.auth_error.set_text(self.json['reason'])
+					return
 				else:
 					self.log.info("registration successful")
 
