@@ -1030,12 +1030,15 @@ nameserver 152.78.111.113
 		# fstab updated, create symlink from /data -> /srv (we do this
 		# regardless of whether a second disk exists or coming from a
 		# template)
-		self.add_msg("Disks: Symlinking /data to /srv")
-		try:
-			os.symlink('/srv', '/data')
-		except Exception as e:
-			self.fatal("Failed to create symlink: \n" + str(e))
-			return
+		if not os.path.exists('/data'):
+			self.add_msg("Disks: Symlinking /data to /srv")
+			try:
+				os.symlink('/srv', '/data')
+			except Exception as e:
+				self.fatal("Failed to create symlink: \n" + str(e))
+				return
+		else:
+			self.add_msg("Disks: /data already exists - not creating symlink")
 
 		## 8. PUPPET PREP ######################################################
 
