@@ -45,7 +45,7 @@ ROUTERS_MAP = {
 }
 
 class Bonemeal:
-	version       = '2017-05-31-01'
+	version       = '2017-08-25-01'
 
 	# [bonemeal]
 	config = {
@@ -933,17 +933,18 @@ nameserver 152.78.111.113
 				return
 
 			## PuppetLabs Yum Repository GPG Key
-			(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/pki/rpm-gpg/RPM-GPG-KEY-PUPPET-COLLECTIONS","https://rhn.soton.ac.uk/pub/RPM-GPG-KEY-PUPPET-COLLECTIONS","--no-check-certificate"])
+			for gpgkey in ['RPM-GPG-KEY-PUPPET-COLLECTIONS', 'RPM-GPG-KEY-puppet', 'RPM-GPG-KEY-puppetlabs']:
+				(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/pki/rpm-gpg/" + gpgkey ,"https://rhn.soton.ac.uk/pub/" + gpgkey,"--no-check-certificate"])
 
-			if code != 0:
-				self.fatal("Could not download the Puppet RPM GPG key: \n" + stdout + "\n" + stderr)
-				return
+				if code != 0:
+					self.fatal("Could not download the Puppet RPM GPG key (" + gpgkey + "): \n" + stdout + "\n" + stderr)
+					return
 
-			(code, stdout, stderr) = self.sysexec(["/bin/rpm","--import","/etc/pki/rpm-gpg/RPM-GPG-KEY-PUPPET-COLLECTIONS"])
+				(code, stdout, stderr) = self.sysexec(["/bin/rpm","--import","/etc/pki/rpm-gpg/" + gpgkey])
 
-			if code != 0:
-				self.fatal("Could not import the Puppet RPM GPG key: \n" + stdout + "\n" + stderr)
-				return
+				if code != 0:
+					self.fatal("Could not import the Puppet RPM GPG key (" + gpkey + "): \n" + stdout + "\n" + stderr)
+					return
 
 		## 6. YUM UPDATE #######################################################
 
