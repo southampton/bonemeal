@@ -1,17 +1,35 @@
 #!/bin/bash
+INSTALL_HOST="install.soton.ac.uk"
+BUILD_MOUNT="/mnt/build"
 
 if [ -f /.bonemeal ]; then
 
 	## prevent logs from being printed on tty1
 	/bin/dmesg -n1
 
-	echo "[bonemeal] Updating installer from install.soton.ac.uk..."
-	sleep 5
+	echo "[bonemeal] Waiting for network..."
 
-	mkdir -p /mnt/build
-	mount -o nolock install.soton.ac.uk:/data/bonemeal /mnt/build
-	cp /mnt/build/bonemeal.workstation /sbin/soton-setup-run
-	umount /mnt/build
+	# Attempt this up to 30 times (approximately 30-60 seconds)
+	for i in {1..30}; do
+		# Ping once, waiting up to one second
+		ping -q -c 1 -W 1 $INSTALL_HOST >/dev/null 2>/dev/null
+
+		# If the ping succeeded...
+		if [ "x$?" == "x0" ]; then
+			# Stop waiting
+			break
+		fi
+
+		# If the network is down, pinging will fail almost immediately, so sleep
+		sleep 1
+	done
+
+	# Even if the above fails, try to update the installer anyway
+	echo "[bonemeal] Updating installer from install.soton.ac.uk..."
+	mkdir -p $BUILD_MOUNT
+	mount -o nolock $INSTALL_HOST:/data/bonemeal $BUILD_MOUNT
+	cp $BUILD_MOUNT/bonemeal.workstation /sbin/soton-setup-run
+	umount $BUILD_MOUNT
 	chmod 0755 /sbin/soton-setup-run
 
 	/sbin/soton-setup-run
