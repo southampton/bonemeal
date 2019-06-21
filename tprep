@@ -21,14 +21,26 @@ if [[ $REPLY =~ ^[Yy]([Ee][Ss])?$ ]]; then
 	echo " - Removing HWADDR and UUID settings from network config files"
 	/bin/sed -i '/^[ \t]*\(HWADDR\|UUID\)/d' /etc/sysconfig/network-scripts/ifcfg-eth*
 
+	echo " - Removing katello-ca-consumer-* package(s)"
+	/usr/bin/yum erase -y katello-ca-consumer-*
+
 	echo " - Cleaning up yum data"
 	/usr/bin/yum clean all
+
+	echo " - Cleaning up yum cache"
+	/bin/rm -rf /var/cache/yum
+
+	echo " - Tidying up katello-agent cache"
+	/bin/rm -f /var/cache/katello-agent/enabled_repos.json
 
 	echo " - Unregistering with subscription manager"
 	/usr/bin/subscription-manager unregister
 
 	echo " - Cleaning up subscription manager data"
 	/usr/bin/subscription-manager clean
+
+	echo " - Cleaning up katello facts"
+	/bin/rm -f /etc/rhsm/facts/katello.facts
 
 	echo " - Removing Puppet SSL certificates"
 	/bin/rm -rf /etc/puppetlabs/puppet/ssl/
@@ -54,6 +66,8 @@ if [[ $REPLY =~ ^[Yy]([Ee][Ss])?$ ]]; then
 	/bin/rm -f /var/log/yum-*
 	/bin/rm -f /var/log/up2date-*
 	/bin/rm -f /root/bonemeal-installer.log
+	/bin/rm -f /root/anaconda-ks.cfg
+	/bin/rm -f /root/original-ks.cfg
 
 	echo " - Remove bash history for root"
 	/bin/rm -f /root/.bash_history
@@ -68,6 +82,10 @@ if [[ $REPLY =~ ^[Yy]([Ee][Ss])?$ ]]; then
 
 	echo " - Removing dhclient exit hooks"
 	/bin/rm -f /etc/dhcp/dhclient-exit-hooks
+
+	echo " - Removing TSM configuration"
+	/bin/rm -f /opt/tivoli/tsm/client/ba/bin/dsm.opt
+	/bin/rm -f /opt/tivoli/tsm/client/ba/bin/dsm.sys
 
 	echo " - Creating bonemeal marker files"
 	/bin/touch /.bonemeal

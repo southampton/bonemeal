@@ -26,37 +26,54 @@ NETWORKS_LIST = [
 	IPNetwork("152.78.128.0/22"),
 	IPNetwork("152.78.136.0/22"),
 	IPNetwork("192.168.168.0/22"),
+	IPNetwork("192.168.172.0/22"),
 	IPNetwork("152.78.140.0/23"),
 	IPNetwork("152.78.142.0/23"),
 	IPNetwork("152.78.155.0/24"),
-	IPNetwork("10.18.36.0/22")
+	IPNetwork("192.168.76.0/22"),
+	IPNetwork("10.18.36.0/22"),
+	IPNetwork("192.168.62.0/24"),
+	IPNetwork("192.168.63.0/25"),
+	IPNetwork("10.7.4.0/22"),
+	IPNetwork("152.78.180.0/23"),
 ]
 
 ROUTERS_MAP = {
 	"152.78.128.0/22":  '152.78.128.17',
 	"152.78.136.0/22":  '152.78.137.254',
 	"192.168.168.0/22": '192.168.171.254',
+	"192.168.172.0/22": '192.168.175.254',
 	"152.78.140.0/23":  '152.78.141.254',
 	"152.78.142.0/23":  '152.78.143.254',
 	"152.78.155.0/24":  '152.78.155.254',
+	"192.168.76.0/22":  '192.168.79.254',
 	"10.18.36.0/22":    '10.18.39.254',
+	"192.168.62.0/24":  '192.168.62.254',
+	"192.168.63.0/25":  '192.168.63.126',
+	"10.7.4.0/22":      '10.7.7.254',
+	"152.78.180.0/23":  '152.78.181.254',
 }
 
 class Bonemeal:
-	version       = '2016-05-04-02'
+	version       = '2018-09-17-01'
 
 	# [bonemeal]
 	config = {
-		'title'         : 'RHEL Server Setup',
-		'log_file'      : '/root/bonemeal-installer.log',
-		'puppet_ssldir' : '/etc/puppetlabs/puppet/ssl/',
-		'puppet_binary' : '/opt/puppetlabs/bin/puppet',
-		'puppet_master' : 'puppet',
-		'cortex_url'    : 'https://cortex.domain.tld/',
-		'cortex_verify' : False,
-		'satellite_rpm' : 'http://satellite.yourdomain.tld/pub/katello-ca-consumer-latest.noarch.rpm',
-		'satellite6'    : False, # if false, assumes you have Satellite 5 rather than 6.
-		'skip_puppet'   : False, # if true, Puppet steps are skipped - allows for building Puppet servers
+		'title'             : 'RHEL Server Setup',
+		'log_file'          : '/root/bonemeal-installer.log',
+		'puppet_ssldir'     : '/etc/puppetlabs/puppet/ssl/',
+		'puppet_binary'     : '/opt/puppetlabs/bin/puppet',
+		'puppet_master'     : 'puppet',
+		'skip_puppet'       : False, # if true, Puppet steps are skipped - allows for building Puppet servers
+		'cortex_url'        : 'https://cortex.domain.tld/',
+		'cortex_verify'     : False,
+		'skip_cortex'       : False, # if true, Cortex steps are skipped - allows for building without Cortex
+		'satellite_rpm'     : 'http://satellite.yourdomain.tld/pub/katello-ca-consumer-latest.noarch.rpm',
+		'satellite6'        : False, # if false, assumes you have Satellite 5 rather than 6.
+		'satellite_org'     : '',    # only used for Satellite 6
+		'skip_puppet'       : False, # if true, Puppet steps are skipped - allows for building Puppet servers
+		'post_install'      : None,
+		'post_install_args' : "",
 	}
 
 	## colour setup
@@ -66,7 +83,7 @@ class Bonemeal:
 		('label', 'white', 'dark blue', 'bold'),
 		('bg', 'white', 'dark blue'),
 		('error', 'yellow', 'dark blue')
-		]
+	]
 
 	## state handling for unhandled input
 	start   = True
@@ -85,30 +102,17 @@ class Bonemeal:
 
 			# try to load config options if they exist - overwriting defaults
 			for key in self.config.keys():
-				if configParser.has_option('bonemeal',key):
-					self.config[key] = configParser.get('bonemeal',key)
+				if configParser.has_option('bonemeal', key):
+					self.config[key] = configParser.get('bonemeal', key)
 
 			# load booleans in as a boolean if it is 'no', 'yes', 'True' or 'False'
-			try:
-				self.config['cortex_verify'] = configParser.getboolean('bonemeal','cortex_verify')
-			except ValueError as ex:
-				pass
-			except ConfigParser.NoOptionError as ex:
-				pass
-
-			try:
-				self.config['satellite6'] = configParser.getboolean('bonemeal','satellite6')
-			except ValueError as ex:
-				pass
-			except ConfigParser.NoOptionError as ex:
-				pass
-
-			try:
-				self.config['skip_puppet'] = configParser.getboolean('bonemeal','skip_puppet')
-			except ValueError as ex:
-				pass
-			except ConfigParser.NoOptionError as ex:
-				pass
+			for option in ['cortex_verify', 'satellite6', 'skip_puppet', 'skip_cortex']:
+				try:
+					self.config[option] = configParser.getboolean('bonemeal', option)
+				except ValueError as ex:
+					pass
+				except ConfigParser.NoOptionError as ex:
+					pass
 
 		except Exception as ex:
 			print "[bonemeal] Could not read from config file " + CONFIG_FILE + ": " + str(ex)
@@ -142,6 +146,12 @@ class Bonemeal:
 		else:
 			self.fromTemplate = False
 			view_function = self.view_interactive()
+
+		## Detect if we're doing an ECS Student VM (SVM) install
+		if os.path.exists('/.bonemeal_svm'):
+			self.ecsStudentVM = True
+		else:
+			self.ecsStudentVM = False
 
 		# make tab work like down arrow...sort of.
 		urwid.command_map['tab'] = 'cursor down'
@@ -196,8 +206,11 @@ class Bonemeal:
 
 ################################################################################
 
-	def sysexec(self,command,shell=False):
-		self.log.info("executing command: " + str(command))
+	def sysexec(self,command,shell=False,log_args=True):
+		if type(command) is str or (type(command) is list and log_args):
+			self.log.info("executing command: " + str(command))
+		else:
+			self.log.info("executing command (arguments hidden): " + str(command[0]))
 
 		try:
 			proc = subprocess.Popen(command,stdout=subprocess.PIPE, stderr=subprocess.STDOUT,shell=shell)
@@ -243,10 +256,15 @@ class Bonemeal:
 		bt    = urwid.BigText('I am ready to build', font=urwid.font.HalfBlock5x4Font())
 		btwp  = urwid.Padding(bt, "center", 'clip')
 
-		if not self.fromTemplate and self.config['skip_puppet']:
-			txt   = urwid.Text(u"Press any key to get started or Shift+Q to exit\nPuppet steps will be skipped because skip_puppet is set in /etc/bonemeal.conf",align='center')
-		else:
-			txt   = urwid.Text(u"Press any key to get started or Shift+Q to exit",align='center')
+		txt_str = u"Press any key to get started or Shift+Q to exit"
+
+		if not self.fromTemplate:
+			if self.config['skip_puppet']:
+				txt_str += u"\nPuppet steps will be skipped because skip_puppet is set in /etc/bonemeal.conf"
+			if self.config['skip_cortex']:
+				txt_str += u"\nCortex steps will be skipped because skip_cortex is set in /etc/bonemeal.conf"
+
+		txt   = urwid.Text(txt_str, align='center')
 
 		pile1 = urwid.Pile([btwp,div,txt])
 		pile1 = urwid.Filler(pile1, 'middle', None, 7)
@@ -418,7 +436,11 @@ class Bonemeal:
 		self.log.info("netmask: " + str(self.netmask))
 
 		self.footer_text.set_text(self.fqdn + " / " + self.netif + " / " + self.ipaddr)
-		self.view_auth()
+
+		if self.config['skip_cortex']:
+			self.view_sat_activation_key()
+		else:
+			self.view_auth()
 
 ################################################################################
 
@@ -444,7 +466,11 @@ class Bonemeal:
 		self.log.info("dhcp networking chosen")
 		self.dhcp = True
 		self.footer_text.set_text(self.fqdn + " / " + self.netif + " / dhcp")
-		self.view_auth()
+		
+		if self.config['skip_cortex']:
+			self.view_sat_activation_key()
+		else:
+			self.view_auth()
 
 ################################################################################
 ## AUTHENTICATE / REGISTER
@@ -482,6 +508,11 @@ class Bonemeal:
 		## python requests call with SSL...
 		try:
 			payload = {'ident': self.ident, 'hostname': self.fqdn, 'username': self.username.get_edit_text(), 'password': self.password.get_edit_text()}
+
+			# Update the OS identity for ECS student VMs
+			if self.ecsStudentVM:
+				payload['ident'] = payload['ident'] + '-svm'
+
 			r = requests.post(self.config['cortex_url'] + "api/register", data=payload, verify = self.config['cortex_verify'])
 		except Exception as ex:
 			self.log.error("error contacting registration server: " + type(ex).__name__ + ": " + str(ex))
@@ -490,11 +521,16 @@ class Bonemeal:
 
 		if r.status_code == 200:
 			try:
-				self.json = r.json()
-				self.puppet_private_key = self.json['private_key']
-				self.puppet_public_key  = self.json['public_key']
-				self.puppet_cert        = self.json['cert']
-				self.sat_activation_key = self.json['satellite_activation_key']
+				self.cortex_data = r.json()
+
+				# We won't get this with ECS Student VMs
+				if not self.ecsStudentVM:
+					self.puppet_private_key = self.cortex_data['private_key']
+					self.puppet_public_key  = self.cortex_data['public_key']
+					self.puppet_cert        = self.cortex_data['cert']
+
+				self.sat_activation_key = self.cortex_data['satellite_activation_key']
+
 			except Exception as ex:
 				self.log.error("failed to parse response from registration server: " + type(ex).__name__ + ": " + str(ex))
 				self.auth_error.set_text("Failed to understand return response: " + type(ex).__name__ + ": " + str(ex))
@@ -509,6 +545,45 @@ class Bonemeal:
 			self.log.error("unexpected return code from registration server: " + str(r.status_code))
 			self.auth_error.set_text("Registration failed: Error code " + str(r.status_code))
 			return
+
+################################################################################
+## SATELLITE ACTIVATION KEY
+
+	def view_sat_activation_key(self):
+
+		div = urwid.Divider()
+
+		htxt = urwid.Text(u"Please enter a satellite activation key for the server.",align='left')
+
+		self.sat_activation_key_edit = urwid.Edit( caption=('label'," Activation Key:  "))
+		ed = urwid.AttrMap(self.sat_activation_key_edit, 'edit')
+
+		button = urwid.Button("Continue")
+		urwid.connect_signal(button, 'click', self.handle_sat_activation_key)
+		button = urwid.Padding(button,"center", width=12)
+
+		self.sat_activation_key_error = urwid.Text(u"",align='left')
+		err = urwid.AttrMap(self.sat_activation_key_error, 'error')
+
+		pile = urwid.Pile([div,htxt,div,ed,div,button,div,err])
+		pile = urwid.Padding(pile, "left", left=1,right=1)
+		fill = urwid.Filler(pile, 'top')
+		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
+		self.switch_view(urwid.AttrMap(frame, 'bg'))
+
+################################################################################
+
+	def handle_sat_activation_key(self, button):
+
+		self.sat_activation_key = self.sat_activation_key_edit.get_edit_text()
+
+		if len(self.sat_activation_key.strip()) <= 0:
+			self.sat_activation_key_error.set_text("You must enter a Satellite Activation Key")
+			return
+
+		self.log.info("chosen satellite activation key: " + self.sat_activation_key)
+
+		self.view_go()
 
 ################################################################################
 ## DO INSTALL "GO"
@@ -546,7 +621,10 @@ class Bonemeal:
 			try:
 				# this is not...a very good way to getting the UUID. It works on current VMs but might not work in future.
 				# really it should be parsing the values and checking dmi_types and such. oh well...
-				self.vmuuid = dmidecode.system().values()[1]['data']['UUID']
+				u = dmidecode.system().values()[1]['data']['UUID']
+
+				# VMware changed the UUID order in VMHW13 :(
+				self.vmuuid = u[6:8] + u[4:6] + u[2:4] + u[0:2] + '-' + u[11:13] + u[9:11] + '-' + u[16:18] + u[14:16] + '-' + u[19:]
 			except Exception as ex:
 				self.fatal("Could not read system UUID\n" + type(ex).__name__ + ": " + type(ex).__name__ + ": " + str(ex))
 				return
@@ -558,6 +636,11 @@ class Bonemeal:
 			
 			try:
 				payload = {'ident': self.ident, 'uuid': self.vmuuid}
+
+				# Update the OS identity for ECS student VMs
+				if self.ecsStudentVM:
+					payload['ident'] = payload['ident'] + '-svm'
+
 				r = requests.post(self.config['cortex_url'] + "api/register", data=payload, verify = self.config['cortex_verify'])
 			except Exception as ex:
 				self.fatal("An error occured when attempting to contact cortex: \n" + type(ex).__name__ + ": " + type(ex).__name__ + ": " + str(ex))
@@ -566,20 +649,23 @@ class Bonemeal:
 			if r.status_code == 200:
 				try:
 					self.add_msg("Cortex: Successful response from cortex server")
-					self.json = r.json()
+					self.cortex_data = r.json()
 
 					## Puppet bits
-					self.puppet_private_key = self.json['private_key']
-					self.puppet_public_key  = self.json['public_key']
-					self.puppet_cert        = self.json['cert']
+					if 'private_key' in self.cortex_data:
+						self.puppet_private_key = self.cortex_data['private_key']
+					if 'public_key' in self.cortex_data:
+						self.puppet_public_key = self.cortex_data['public_key']
+					if 'cert' in self.cortex_data:
+						self.puppet_cert = self.cortex_data['cert']
 
 					## Activation key for Satellite
-					self.sat_activation_key = self.json['satellite_activation_key']
+					self.sat_activation_key = self.cortex_data['satellite_activation_key']
 
 					## The hostname and IP address
-					self.hostname = self.json['hostname']
-					self.fqdn     = self.json['fqdn']
-					self.ipaddr   = self.json['ipaddress']
+					self.hostname = self.cortex_data['hostname']
+					self.fqdn     = self.cortex_data['fqdn']
+					self.ipaddr   = self.cortex_data['ipaddress']
 
 				except Exception as ex:
 					self.fatal("Could not parse return response from cortex: " + type(ex).__name__ + ": " + type(ex).__name__ + ": " + str(ex))
@@ -627,7 +713,6 @@ class Bonemeal:
 				except LookupError:
 					self.fatal("The IP address set by cortex is not within a known network: " + str(self.ipaddr))
 					return
-
 
 				self.add_msg("Cortex: IP Address will be set to: " + str(self.ipaddr))
 				self.add_msg("Cortex: Netmask will be set to: "    + str(self.netmask))
@@ -819,19 +904,26 @@ nameserver 152.78.111.113
 
 			## SATELLITE 6
 
-			## satellite cert rpm will already be installed in the template
-			if not self.fromTemplate:
-				self.add_msg("Satellite: Installing certificate RPM")
-				(code, stdout, stderr) = self.sysexec(["rpm","-ivh",self.config['satellite_rpm']])
+			## See if the rpm is already installed. The package name is
+			## unique to the satellite server, so we instead check to see if
+			## /usr/bin/katello-rhsm-consumer (which is deployed by the
+			## package) exists and is owned by any package
+			(code, stdout, stderr) = self.sysexec(["/bin/rpm", "-qf", "/usr/bin/katello-rhsm-consumer"])
+
+			if code == 0:
+				self.add_msg("Satellite: katello-ca-consumer is already installed")
+			else:
+				self.add_msg("Satellite: Installing katello-ca-consumer")
+				(code, stdout, stderr) = self.sysexec(["rpm", "-ivh", self.config['satellite_rpm']])
 
 				if code != 0:
-					self.add_msg("WARNING: could not install certificate RPM for satellite:")
+					self.add_msg("WARNING: could not install satellite SSL certificate RPM:")
 					self.add_msg(stdout)
 					self.add_msg(stderr)
 					self.warnings = self.warnings + 1
 
 			self.add_msg("Satellite: Registering with Katello")
-			(code, stdout, stderr) = self.sysexec('/usr/sbin/subscription-manager register --org="University_of_Southampton" --activationkey="' + self.sat_activation_key + '"',shell=True) 
+			(code, stdout, stderr) = self.sysexec(['/usr/sbin/subscription-manager', 'register', '--force', '--org=' + self.config['satellite_org'], '--activationkey=' + self.sat_activation_key], log_args=False) 
 
 			if code != 0:
 				self.fatal("Satellite: Could not register with katello: \n" + stdout + "\n" + stderr)
@@ -839,10 +931,19 @@ nameserver 152.78.111.113
 			else:
 				self.add_msg("Satellite: Katello registration successful")
 
+			self.add_msg("Satellite: Enabling Satellite Tools repo")
+			(code, stdout, stderr) = self.sysexec(['/usr/sbin/subscription-manager', 'repos', '--enable=rhel-*-satellite-tools-*-rpms']) 
+
+			if code != 0:
+				self.fatal("Satellite: Could not enable Satellite Tools repo: \n" + stdout + "\n" + stderr)
+				return
+			else:
+				self.add_msg("Satellite: Satellite Tools repo enabled")
+
 			## katello-agent rpm will already be installed in the template
 			if not self.fromTemplate:
 				self.add_msg("Satellite: Installing katello-agent")
-				(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install katello-agent",shell=True)
+				(code, stdout, stderr) = self.sysexec(["/usr/bin/yum", "-y", "install", "katello-agent"])
 
 				if code != 0:
 					self.fatal("Satellite: Could not install katello-agent: \n" + stdout + "\n" + stderr)
@@ -856,10 +957,10 @@ nameserver 152.78.111.113
 
 			self.add_msg("Satellite: Downloading rhn-org-trusted-ssl-cert")
 
-			(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/tmp/rhn-org-trusted-ssl-cert.rpm",self.config['satellite_rpm'],"--no-check-certificate"])
+			(code, stdout, stderr) = self.sysexec(["/usr/bin/wget", "-q", "-O", "/tmp/rhn-org-trusted-ssl-cert.rpm", self.config['satellite_rpm'], "--no-check-certificate"])
 
 			if code != 0:
-				self.fatal("Could not download up2date config file: \n" + stdout + "\n" + stderr)
+				self.fatal("Could not download certificate RPM for satellite: \n" + stdout + "\n" + stderr)
 				return
 
 			## See if the rpm is already installed
@@ -889,7 +990,7 @@ nameserver 152.78.111.113
 			self.add_msg("Satellite: Installed up2date config file")
 			self.add_msg("Satellite: Registering with rhnregks")
 
-			(code, stdout, stderr) = self.sysexec('/usr/sbin/rhnreg_ks --force --activationkey="' + self.sat_activation_key + '"',shell=True) 
+			(code, stdout, stderr) = self.sysexec(['/usr/sbin/rhnreg_ks', '--force', '--activationkey=' + self.sat_activation_key], log_args=False)
 
 			if code != 0:
 				self.fatal("Could not register with Red Hat Satellite: \n" + stdout + "\n" + stderr)
@@ -930,18 +1031,20 @@ nameserver 152.78.111.113
 				self.fatal("Could not import the EPEL RPM GPG key: \n" + stdout + "\n" + stderr)
 				return
 
-			## PuppetLabs Yum Repository GPG Key
-			(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/pki/rpm-gpg/RPM-GPG-KEY-PUPPET-COLLECTIONS","https://rhn.soton.ac.uk/pub/RPM-GPG-KEY-PUPPET-COLLECTIONS","--no-check-certificate"])
+			## PuppetLabs Yum Repository GPG Key (not for ECS builds)
+			if not self.ecsStudentVM:
+				for gpgkey in ['RPM-GPG-KEY-PUPPET-COLLECTIONS', 'RPM-GPG-KEY-puppet', 'RPM-GPG-KEY-puppetlabs']:
+					(code, stdout, stderr) = self.sysexec(["/usr/bin/wget","-q","-O","/etc/pki/rpm-gpg/" + gpgkey ,"https://rhn.soton.ac.uk/pub/" + gpgkey,"--no-check-certificate"])
 
-			if code != 0:
-				self.fatal("Could not download the Puppet RPM GPG key: \n" + stdout + "\n" + stderr)
-				return
+					if code != 0:
+						self.fatal("Could not download the Puppet RPM GPG key (" + gpgkey + "): \n" + stdout + "\n" + stderr)
+						return
 
-			(code, stdout, stderr) = self.sysexec(["/bin/rpm","--import","/etc/pki/rpm-gpg/RPM-GPG-KEY-PUPPET-COLLECTIONS"])
+					(code, stdout, stderr) = self.sysexec(["/bin/rpm","--import","/etc/pki/rpm-gpg/" + gpgkey])
 
-			if code != 0:
-				self.fatal("Could not import the Puppet RPM GPG key: \n" + stdout + "\n" + stderr)
-				return
+					if code != 0:
+						self.fatal("Could not import the Puppet RPM GPG key (" + gpkey + "): \n" + stdout + "\n" + stderr)
+						return
 
 		## 6. YUM UPDATE #######################################################
 
@@ -1046,129 +1149,163 @@ nameserver 152.78.111.113
 		## messing with it. Puppet won't be working anyway at the moment because tprep
 		## will have wiped its certificates.
 
-		## templates will have puppet running, we want to stop that before we mess with puppet.
-		if self.fromTemplate:
-			if self.release == 7:
-				self.add_msg("Puppet: Stopping agent")
-				(code, stdout, stderr) = self.sysexec(["/bin/systemctl","stop","puppet"])
+		if not self.ecsStudentVM:
+			## templates will have puppet running, we want to stop that before we mess with puppet.
+			if self.fromTemplate:
+				if self.release == 7:
+					self.add_msg("Puppet: Stopping agent")
+					(code, stdout, stderr) = self.sysexec(["/bin/systemctl","stop","puppet"])
+
+					if code != 0:
+						self.fatal("Could not stop the Puppet agent service: \n" + stdout + "\n" + stderr)
+						return
+
+				elif self.release == 6:
+					self.add_msg("Puppet: Stopping agent")
+					(code, stdout, stderr) = self.sysexec(["/sbin/service","puppet","stop"])
+
+					if code != 0:
+						self.fatal("Could not stop the Puppet agent service: \n" + stdout + "\n" + stderr)
+						return
+
+			# a dependency on our use of puppet is lsb based facter variables
+			# so we install it first.
+			# this will already be installed in the template
+			if not self.fromTemplate:
+				self.add_msg("Puppet: Installing redhat-lsb-core package")
+				(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install redhat-lsb-core",shell=True)
 
 				if code != 0:
-					self.fatal("Could not stop the Puppet agent service: \n" + stdout + "\n" + stderr)
+					self.fatal("Could not install redhat-lsb-core: \n" + stdout + "\n" + stderr)
 					return
+
+			## If puppet was set to skip, then quit here.
+			if self.config['skip_puppet'] and not self.fromTemplate:
+				self.view_finish()
+				return
+
+			## INSTALL PUPPET
+			# this will already be installed in the template
+			if not self.fromTemplate:
+				self.add_msg("Puppet: Installing puppet-agent")
+				(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install puppet-agent",shell=True)
+
+				if code != 0:
+					self.fatal("Could not install Puppet: \n" + stdout + "\n" + stderr)
+					return
+
+			## SET CONFIG - server
+			self.add_msg("Puppet: Setting master server to " + self.config['puppet_master'])
+			(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " config set server " + self.config['puppet_master'] + " --section agent",shell=True)
+
+			if code != 0:
+				self.fatal("Could not set puppet master: \n" + stdout + "\n" + stderr)
+				return
+
+			## SET CONFIG - certname
+			self.add_msg("Puppet: Setting certname to " + self.fqdn)
+			(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " config set certname	 " + self.fqdn + " --section agent",shell=True)
+
+			if code != 0:
+				self.fatal("Could not set puppet certname: \n" + stdout + "\n" + stderr)
+				return
+
+			## Remove existing puppet SSL configuration.
+			if os.path.exists(self.config['puppet_ssldir']):
+				self.add_msg("Puppet: Removing existing SSL directory, if any")
+				try:
+					self.log.info("executing shutil.rmtree against path: " + self.config['puppet_ssldir'])
+					shutil.rmtree(self.config['puppet_ssldir'])
+				except Exception as ex:
+					self.fatal("Could not delete existing Puppet SSL directory:\n" + type(ex).__name__ + ": " + str(ex))
+					return				
+
+			self.add_msg("Puppet: Creating new SSL directory")		
+			self.sysexec(self.config['puppet_binary'] + " agent --fingerprint",shell=True)
+			## it will ALWAYS error here (yay puppet), so ignore
+
+			## Deploy certificates and set certname option in puppet.conf
+			self.add_msg("Puppet: Saving client certificate")
+			try:
+				with open(self.config['puppet_ssldir'] + "certs/" + self.fqdn + ".pem", "w") as fp:
+					fp.write(self.puppet_cert)
+
+				with open(self.config['puppet_ssldir'] + "public_keys/" + self.fqdn + ".pem", "w") as fp:
+					fp.write(self.puppet_public_key)
+
+				with open(self.config['puppet_ssldir'] + "private_keys/" + self.fqdn + ".pem", "w") as fp:
+					fp.write(self.puppet_private_key)
+			except Exception as ex:
+				self.fatal("Could not save puppet certificate files:\n" + type(ex).__name__ + ": " + str(ex))
+				return
+
+			self.add_msg("Puppet: Applying policy")
+			## we run twice just to be sure. we only care about the exit code of the second
+			self.sysexec(self.config['puppet_binary'] + " agent --test",shell=True)
+			(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " agent --test",shell=True)
+
+			if code != 0 and code != 2:
+				self.fatal("Puppet reported an error when applying policy to this system: \n" + stdout + "\n" + stderr)
+				return
+
+			## Set Puppet to run all the time
+			self.add_msg("Puppet: Enabling on startup")
+			if self.release == 7:
+				(code, stdout, stderr) = self.sysexec(["/bin/systemctl","enable","puppet"])
+
+				if code != 0:
+					self.add_msg("WARNING: Failed to configure Puppet to launch on startup")
+					self.add_msg(stdout)
+					self.add_msg(stderr)
+					self.warnings = self.warnings + 1
 
 			elif self.release == 6:
-				self.add_msg("Puppet: Stopping agent")
-				(code, stdout, stderr) = self.sysexec(["/sbin/service","puppet","stop"])
+				(code, stdout, stderr) = self.sysexec(["/sbin/chkconfig","puppet","on"])
 
 				if code != 0:
-					self.fatal("Could not stop the Puppet agent service: \n" + stdout + "\n" + stderr)
-					return
+					self.add_msg("WARNING: Failed to configure Puppet to launch on startup")
+					self.add_msg(stdout)
+					self.add_msg(stderr)
+					self.warnings = self.warnings + 1
 
-		# a dependency on our use of puppet is lsb based facter variables
-		# so we install it first.
-		# this will already be installed in the template
-		if not self.fromTemplate:
-			self.add_msg("Puppet: Installing redhat-lsb-core package")
-			(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install redhat-lsb-core",shell=True)
+		## 9. POST-INSTALL SCRIPT ##############################################
 
-			if code != 0:
-				self.fatal("Could not install redhat-lsb-core: \n" + stdout + "\n" + stderr)
-				return
+		# If we have a post-install script to call
+		if self.config['post_install'] is not None and len(self.config['post_install'].strip()) > 0:
+			self.add_msg('Post-install: Running post-install customisations')
 
-		## If puppet was set to skip, then quit here.
-		if self.config['skip_puppet'] and not self.fromTemplate:
-			self.view_finish()
-			return
-
-		## INSTALL PUPPET
-		# this will already be installed in the template
-		if not self.fromTemplate:
-			self.add_msg("Puppet: Installing puppet-agent")
-			(code, stdout, stderr) = self.sysexec("/usr/bin/yum -y install puppet-agent",shell=True)
-
-			if code != 0:
-				self.fatal("Could not install Puppet: \n" + stdout + "\n" + stderr)
-				return
-
-		## SET CONFIG - server
-		self.add_msg("Puppet: Setting master server to " + self.config['puppet_master'])
-		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " config set server " + self.config['puppet_master'] + " --section agent",shell=True)
-
-		if code != 0:
-			self.fatal("Could not set puppet master: \n" + stdout + "\n" + stderr)
-			return
-
-		## SET CONFIG - certname
-		self.add_msg("Puppet: Setting certname to " + self.fqdn)
-		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " config set certname	 " + self.fqdn + " --section agent",shell=True)
-
-		if code != 0:
-			self.fatal("Could not set puppet certname: \n" + stdout + "\n" + stderr)
-			return
-
-		## Remove existing puppet SSL configuration.
-		if os.path.exists(self.config['puppet_ssldir']):
-			self.add_msg("Puppet: Removing existing SSL directory, if any")
-			try:
-				self.log.info("executing shutil.rmtree against path: " + self.config['puppet_ssldir'])
-				shutil.rmtree(self.config['puppet_ssldir'])
-			except Exception as ex:
-				self.fatal("Could not delete existing Puppet SSL directory:\n" + type(ex).__name__ + ": " + str(ex))
-				return				
-
-		self.add_msg("Puppet: Creating new SSL directory")		
-		self.sysexec(self.config['puppet_binary'] + " agent --fingerprint",shell=True)
-		## it will ALWAYS error here (yay puppet), so ignore
-
-		## Deploy certificates and set certname option in puppet.conf
-		self.add_msg("Puppet: Saving client certificate")
-		try:
-			with open(self.config['puppet_ssldir'] + "certs/" + self.fqdn + ".pem", "w") as fp:
-				fp.write(self.puppet_cert)
-
-			with open(self.config['puppet_ssldir'] + "public_keys/" + self.fqdn + ".pem", "w") as fp:
-				fp.write(self.puppet_public_key)
-
-			with open(self.config['puppet_ssldir'] + "private_keys/" + self.fqdn + ".pem", "w") as fp:
-				fp.write(self.puppet_private_key)
-		except Exception as ex:
-			self.fatal("Could not save puppet certificate files:\n" + type(ex).__name__ + ": " + str(ex))
-			return
-
-		self.add_msg("Puppet: Applying policy")
-		## we run twice just to be sure. we only care about the exit code of the second
-		self.sysexec(self.config['puppet_binary'] + " agent --test",shell=True)
-		(code, stdout, stderr) = self.sysexec(self.config['puppet_binary'] + " agent --test",shell=True)
-
-		if code != 0 and code != 2:
-			self.fatal("Puppet reported an error when applying policy to this system: \n" + stdout + "\n" + stderr)
-			return
-
-		## Set Puppet to run all the time
-		self.add_msg("Puppet: Enabling on startup")
-		if self.release == 7:
-			(code, stdout, stderr) = self.sysexec(["/bin/systemctl","enable","puppet"])
-
-			if code != 0:
-				self.add_msg("WARNING: Failed to configure Puppet to launch on startup")
-				self.add_msg(stdout)
-				self.add_msg(stderr)
+			if not os.path.exists(self.config['post_install']):
+				self.add_msg('WARNING: Post-install script does not exist - skipping')
 				self.warnings = self.warnings + 1
+			else:
+				# Build post-install command line
+				post_install_exec = [self.config['post_install']]
 
-		elif self.release == 6:
-			(code, stdout, stderr) = self.sysexec(["/sbin/chkconfig","puppet","on"])
+				# Iterate over the list of arguments required (space separated) and 
+				for argument in self.config['post_install_args'].split(' '):
+					# Skip zero-length arguments (double-spaced, or leading/trailing spaces in config)
+					if len(argument) > 0:
+						# Add the argument value on if it exists in the Cortex data
+						if argument in self.cortex_data:
+							post_install_exec.append(self.cortex_data[argument])
+						else:
+							post_install_exec.append('')
+				
+				# Run the post-install script (don't log arguments as it could contain a password)
+				(code, stdout, stderr) = self.sysexec(post_install_exec, log_args=False)
 
-			if code != 0:
-				self.add_msg("WARNING: Failed to configure Puppet to launch on startup")
-				self.add_msg(stdout)
-				self.add_msg(stderr)
-				self.warnings = self.warnings + 1
+				if code != 0:
+					self.add_msg("WARNING: Post-install script produced non-zero exit code")
+					self.add_msg(stdout)
+					self.add_msg(stderr)
+					self.warnings = self.warnings + 1
+
+		## END: NOTIFY CORTEX OR USER ##########################################
 
 		if self.fromTemplate:
-
 			## update the server to say we're done installing
 			try:
-				payload = {'uuid': self.vmuuid}
+				payload = {'uuid': self.vmuuid, 'warnings': self.warnings}
 				r = requests.post(self.config['cortex_url'] + "api/installer/notify", data=payload, verify = self.config['cortex_verify'])
 
 				if r.status_code != 200:
@@ -1236,6 +1373,10 @@ nameserver 152.78.111.113
 		## Delete the template marker file too, if appropriate
 		if self.fromTemplate:
 			os.unlink('/.bonemeal_template')
+
+		## Delete the ECS student VM marker file too, if appropriate
+		if self.ecsStudentVM:
+			os.unlink('/.bonemeal_svm')
 
 		## reboot
 		self.sysexec("/sbin/reboot")

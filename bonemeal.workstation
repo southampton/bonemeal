@@ -19,10 +19,11 @@ import sys
 import termios
 import dmidecode
 import re
+import pipes      # for pipes.quote (replace with shlex in Python 3)
 from multiprocessing import Process, Manager
 
 class Bonemeal:
-	version       = '2017-02-20-01'
+	version       = '2017-09-01-01'
 
 	# [bonemeal]
 	config = {
@@ -39,7 +40,8 @@ class Bonemeal:
 		'reskit_server'    : 'reskit.yourdomain.tld',
 		'reskit_share'     : 'reskit',
 		'csw_server'       : 'csw.yourdomain.tld',
-		'base_dir'         : '/etc/soton', 
+		'base_dir'         : '/etc/soton',
+		'manifests'        : 'site',
 	}
 
 	## colour setup
@@ -92,9 +94,29 @@ class Bonemeal:
 			if not self.config['server_url'].endswith("/"):
 				self.config['server_url'] = self.config['server_url'] + "/"
 
+			# Split the manifests on comma to produce a list
+			self.config['manifests_order'] = self.config['manifests'].split(',')
+
+			# Build a dictionary mapping manifest ID to manifest name
+			self.config['manifests_dict'] = {}
+			self.config['ad_ou_dict'] = {}
+			for key in self.config['manifests_order']:
+				if configParser.has_option('bonemeal', 'manifest_' + key):
+					self.config['manifests_dict'][key] = configParser.get('bonemeal', 'manifest_' + key)
+				else:
+					self.config['manifests_dict'][key] = key
+
+				# Handle AD joining
+				if configParser.has_option('bonemeal', 'ad_ou_' + key):
+					self.config['ad_ou_dict'][key] = configParser.get('bonemeal', 'ad_ou_' + key)
+				else:
+					self.config['ad_ou_dict'][key] = None
+
 		except Exception as ex:
 			print "[bonemeal] Could not read from config file " + CONFIG_FILE + ": " + str(ex)
 			print "[bonemeal] Starting with default options"
+		
+		print repr(self.config)
 
 		# logging
 		self.log    = logging.getLogger("bonemeal")
@@ -248,8 +270,22 @@ class Bonemeal:
 			self.asset_tag = None
 
 		## Only set the UOS name if it matches UOS-number or ISS-number
-		if not re.match(r"^(uos|iss|lnx|UOS|ISS|LNX)\-[0-9]{2,8}$",self.asset_tag):
+		## or an ECS-lab style number
+		if not re.match(r"^(((uos|iss|lnx|UOS|ISS|LNX)\-[0-9]{2,8})|([A-Za-z][0-9]{2,8}))$",self.asset_tag):
 			self.asset_tag = None
+
+		## If there is no asset tag, try falling back to the 
+		## DHCP-acquired hostname
+		if self.asset_tag is None:
+			try:
+				# node() *might* return an FQDN, so return only the first component
+				self.asset_tag = platform.node().split('.')[0]
+			except Exception as ex:
+				self.asset_tag = None
+
+			# Validate the DHCP hostname (includes ECS additions)
+			if not re.match(r"^(((uos|iss|lnx|UOS|ISS|LNX)\-[0-9]{2,8})|([A-Za-z][0-9]{2,8}))$",self.asset_tag):
+				self.asset_tag = None
 
 		div = urwid.Divider()
 		htxt = urwid.Text(u"Please enter the name of the computer. You can use the arrow keys to move between fields.",align='left')
@@ -288,7 +324,7 @@ class Bonemeal:
 			self.hostname_error.set_text("That hostname is invalid. Please try again.")
 			return
 
-		if not re.match(r"^(uos|iss|lnx|UOS|ISS|LNX)\-[0-9]{2,8}$",self.hostname):
+		if not re.match(r"^(((uos|iss|lnx|UOS|ISS|LNX)\-[0-9]{2,8})|([A-Za-z][0-9]{2,8}))$",self.hostname):
 			self.hostname_error.set_text("That name is invalid. It must be of the form UOS-<number>")
 			return
 
@@ -300,6 +336,38 @@ class Bonemeal:
 		self.log.info("chosen fqdn: " + self.fqdn)
 
 		self.footer_text.set_text(self.fqdn)
+		self.view_setmanifest()
+
+################################################################################
+
+	def view_setmanifest(self):
+		div = urwid.Divider()
+		htxt = urwid.Text(u"Please choose which variant of the build to deploy to the computer. You can use the arrow keys to move between items in the list. Press Enter to select.", align='left')
+
+		# Set up a list body that contains buttons that choose a manifest
+		manifest_list_body = []
+		for key in self.config['manifests_order']:
+			button = urwid.Button(self.config['manifests_dict'][key])
+			urwid.connect_signal(button, 'click', self.handle_manifest, key)
+			manifest_list_body.append(urwid.AttrMap(button, None, focus_map='reversed'))
+
+		# Set up the listbox to contain the list body
+		manifest_list = urwid.ListBox(urwid.SimpleFocusListWalker(manifest_list_body))
+		manifest_list = urwid.BoxAdapter(manifest_list, 5)
+		manifest_list = urwid.Padding(manifest_list, "center", left=2, right=3)
+
+		pile = urwid.Pile([div,htxt,div,manifest_list])
+		pile = urwid.Padding(pile, "left", left=1,right=1)
+		fill = urwid.Filler(pile, 'top')
+		frame = urwid.Frame(header=self.header, body=fill, footer=self.footer)
+		self.switch_view(urwid.AttrMap(frame, 'bg'))
+
+################################################################################
+
+	def handle_manifest(self, button, key):
+		# Store which manifest was selected as we need it later and move
+		# on to the auth view
+		self.puppet_manifest = key
 		self.view_auth()
 
 ################################################################################
@@ -496,23 +564,24 @@ class Bonemeal:
 			drone_config.add_section('reskit')
 			drone_config.add_section('csw')
 
-			drone_config.set('backup','port',    str(self.json['backup_port']))
-			drone_config.set('backup','server',  self.config['ssh_backup_server'])
-			drone_config.set('backup','user',    self.config['ssh_backup_user'])
+			drone_config.set('backup', 'port',     str(self.json['backup_port']))
+			drone_config.set('backup', 'server',   self.config['ssh_backup_server'])
+			drone_config.set('backup', 'user',     self.config['ssh_backup_user'])
 
-			drone_config.set('puppet','user',    self.config['ssh_puppet_user'])
-			drone_config.set('puppet','server',  self.config['ssh_puppet_server'])
-			drone_config.set('puppet','binary',  self.config['puppet_binary'])
+			drone_config.set('puppet', 'user',     self.config['ssh_puppet_user'])
+			drone_config.set('puppet', 'server',   self.config['ssh_puppet_server'])
+			drone_config.set('puppet', 'binary',   self.config['puppet_binary'])
+			drone_config.set('puppet', 'manifest', self.puppet_manifest)
 
-			drone_config.set('server','address', self.config['server_url'])
-			drone_config.set('server','verify',  self.config['server_verify'])
-			drone_config.set('server','api_key', str(self.json['api_key']))
+			drone_config.set('server', 'address',  self.config['server_url'])
+			drone_config.set('server', 'verify',   self.config['server_verify'])
+			drone_config.set('server', 'api_key',  str(self.json['api_key']))
 
-			drone_config.set('reskit','pkgdir', self.config['reskit_pkgdir'])
-			drone_config.set('reskit','server', self.config['reskit_server'])
-			drone_config.set('reskit','share', self.config['reskit_share'])
+			drone_config.set('reskit', 'pkgdir',   self.config['reskit_pkgdir'])
+			drone_config.set('reskit', 'server',   self.config['reskit_server'])
+			drone_config.set('reskit', 'share',    self.config['reskit_share'])
 
-			drone_config.set('csw','server', self.config['csw_server'])
+			drone_config.set('csw',    'server',   self.config['csw_server'])
 
 			with open(self.config['base_dir'] + '/drone.conf', 'w') as f:
 				drone_config.write(f)
@@ -556,9 +625,9 @@ class Bonemeal:
 		## We run this three times because: Puppet
 		## We only care about the output of the final command
 
-		(code, output) = self.sysexec("""%s apply --detailed-exitcodes --modulepath %s/puppet/modules/ %s/puppet/manifests/site.pp""" % (self.config['puppet_binary'],self.config['base_dir'],self.config['base_dir']),shell=True)
-		(code, output) = self.sysexec("""%s apply --detailed-exitcodes --modulepath %s/puppet/modules/ %s/puppet/manifests/site.pp""" % (self.config['puppet_binary'],self.config['base_dir'],self.config['base_dir']),shell=True)
-		(code, output) = self.sysexec("""%s apply --detailed-exitcodes --modulepath %s/puppet/modules/ %s/puppet/manifests/site.pp""" % (self.config['puppet_binary'],self.config['base_dir'],self.config['base_dir']),shell=True)
+		(code, output) = self.sysexec("""%s apply --detailed-exitcodes --modulepath %s/puppet/modules/ %s/puppet/manifests/%s.pp""" % (self.config['puppet_binary'],self.config['base_dir'],self.config['base_dir'],self.puppet_manifest),shell=True)
+		(code, output) = self.sysexec("""%s apply --detailed-exitcodes --modulepath %s/puppet/modules/ %s/puppet/manifests/%s.pp""" % (self.config['puppet_binary'],self.config['base_dir'],self.config['base_dir'],self.puppet_manifest),shell=True)
+		(code, output) = self.sysexec("""%s apply --detailed-exitcodes --modulepath %s/puppet/modules/ %s/puppet/manifests/%s.pp""" % (self.config['puppet_binary'],self.config['base_dir'],self.config['base_dir'],self.puppet_manifest),shell=True)
 
 		## 1: failed
 		## 2: success, some resources changed
@@ -625,6 +694,23 @@ class Bonemeal:
 
 				except Exception as ex:
 					self.log.info("Failed to set plymouth boot options: " + str(type(ex)) + " - " + str(ex))
+
+		## For manifests where we need to join the domain, we now need
+		## to do this. This relies on samba-common-tools being installed,
+		## which is done by Puppet, so we must do this after Puppet.
+		if self.config['ad_ou_dict'][self.puppet_manifest] is not None:
+			shared['display'] = "Joining system to domain"
+			self.log.info("Joining system to domain")
+
+			# Get the username and password the user entered
+			auth_user = self.username.get_edit_text()
+			auth_password = self.password.get_edit_text()
+
+			# Attempt to join the domain
+			(code, output) = self.sysexec("echo " + pipes.quote(auth_password) + " | /usr/bin/net ads join --no-dns-updates createcomputer=" + pipes.quote(self.config['ad_ou_dict'][self.puppet_manifest]) + " osName=\"Red Hat Enterprise Linux Workstation\" osVer=7 -U" + pipes.quote(auth_user), shell=True)
+
+			if code != 0:
+				return self.worker_fatal("An error occurred whilst joining the domain:\n" + output)
 
 		## Finally we use drone (which we deployed earlier via puppet)
 		## to send to the LDI server updated metadata + facts
