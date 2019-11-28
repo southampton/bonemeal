@@ -37,6 +37,13 @@ NETWORKS_LIST = [
 	IPNetwork("10.7.4.0/22"),
 	IPNetwork("152.78.180.0/23"),
 	IPNetwork("192.168.65.0/24"),
+	IPNetwork("152.78.100.0/24"),
+	IPNetwork("152.78.101.0/24"),
+]
+
+NETWORKS6_LIST = [
+	IPNetwork("2001:630:d0:f400::/64"),
+	IPNetwork("2001:630:d0:f500::/64"),
 ]
 
 ROUTERS_MAP = {
@@ -54,10 +61,17 @@ ROUTERS_MAP = {
 	"10.7.4.0/22":      '10.7.7.254',
 	"152.78.180.0/23":  '152.78.181.254',
 	"192.168.65.0/24":  '192.168.65.254',
+	"152.78.100.0/24":  '152.78.100.254',
+	"152.78.101.0/24":  '152.78.101.254',
+}
+
+ROUTERS6_MAP = {
+	"2001:630:d0:f400::/64": 'fe80::f400:254',
+	"2001:630:d0:f500::/64": 'fe80::f500:254',
 }
 
 class Bonemeal:
-	version       = '2019-07-02-01'
+	version       = '2019-11-12-01'
 
 	# [bonemeal]
 	config = {
@@ -421,10 +435,11 @@ class Bonemeal:
 
 	def handle_ipaddr(self,button):
 		self.ipaddr = self.ipaddr_edit.get_edit_text()
+		self.ipv6addr = None
 		self.dhcp = False
 
 		try:
-			self.process_ipaddr(self.ipaddr)
+			self.process_ipaddr()
 		except ValueError:
 			self.ipaddr_error.set_text("That IP address is invalid. Please try again.")
 			return
@@ -446,18 +461,34 @@ class Bonemeal:
 
 ################################################################################
 
-	def process_ipaddr(self,ipaddr):
+	def process_ipaddr(self):
+		address = None
+		addressv6 = None
+
 		try:
 			address = IPAddress(self.ipaddr)
+			if self.ipv6addr is not None:
+				addressv6 = IPAddress(self.ipv6addr)
 		except Exception as ex:
 			## value error means invalid IP address
 			raise ValueError
+
+		self.netmask = None
+		self.router = None
 
 		for ipnet in NETWORKS_LIST:
 			if address in ipnet:
 				self.netmask = ipnet.netmask
 				self.router = ROUTERS_MAP[str(ipnet)]
-				return True
+
+		if self.ipv6addr is not None:
+			for ipv6net in NETWORKS6_LIST:
+				if addressv6 in ipv6net:
+					self.netmask6 = ipv6net.netmask
+					self.router6 = ROUTERS6_MAP[str(ipv6net)]
+
+		if self.netmask and self.router is not None:
+			return True
 
 		## lookup error means invalid network
 		raise LookupError
@@ -668,6 +699,10 @@ class Bonemeal:
 					self.hostname = self.cortex_data['hostname']
 					self.fqdn     = self.cortex_data['fqdn']
 					self.ipaddr   = self.cortex_data['ipaddress']
+					try:
+						self.ipv6addr = self.cortex_data['ipv6address']
+					except Exception as ex:
+						self.ipv6addr = None
 
 				except Exception as ex:
 					self.fatal("Could not parse return response from cortex: " + type(ex).__name__ + ": " + type(ex).__name__ + ": " + str(ex))
@@ -708,7 +743,7 @@ class Bonemeal:
 				self.dhcp = False
 
 				try:
-					self.process_ipaddr(self.ipaddr)
+					self.process_ipaddr()
 				except ValueError:
 					self.fatal("The IP address set by cortex is invalid: " + str(self.ipaddr))
 					return
@@ -719,6 +754,11 @@ class Bonemeal:
 				self.add_msg("Cortex: IP Address will be set to: " + str(self.ipaddr))
 				self.add_msg("Cortex: Netmask will be set to: "    + str(self.netmask))
 				self.add_msg("Cortex: Router will be set to: "     + str(self.router))
+
+				if self.ipv6addr is not None:
+					self.add_msg("Cortex: IPv6 Address will be set to: " + str(self.ipv6addr))
+					self.add_msg("Cortex: Netmaskv6 will be set to: "    + str(self.netmask6))
+					self.add_msg("Cortex: Routerv6 will be set to: "     + str(self.router6))
 
 		## 1. HOSTNAME #########################################################
 
@@ -789,7 +829,9 @@ class Bonemeal:
 		if not self.dhcp:
 			try:
 				with open("/etc/hosts", "a") as hosts_file:
-					hosts_file.write(self.ipaddr + "\t" + self.fqdn + "\t" + self.hostname)
+					hosts_file.write(self.ipaddr + "\t" + self.fqdn + "\t" + self.hostname + "\n")
+					if self.ipv6addr is not None:
+						hosts_file.write(self.ipv6addr + "\t" + self.fqdn + "\t" + self.hostname + "\n")
 			except Exception as e:
 				self.add_msg("WARNING: could not set fqdn in /etc/hosts:")
 				self.add_msg(str(e))
@@ -852,6 +894,12 @@ class Bonemeal:
 			netcfg.append("IPADDR=" + self.ipaddr + "\n")
 			netcfg.append("NETMASK=" + str(self.netmask) + "\n")
 			netcfg.append("GATEWAY=" + self.router + "\n")
+
+			if self.ipv6addr is not None:
+				netcfg.append("IPV6INIT=yes\n")
+				netcfg.append("IPV6_AUTOCONF=no\n")
+				netcfg.append("IPV6ADDR=" + self.ipv6addr + "\n")
+				netcfg.append("IPV6_DEFAULTGW=" + self.router6 + "%" + self.netif + "\n")
 
 		if self.release == 6:
 			netcfg.append("NM_CONTROLLED=no\n")

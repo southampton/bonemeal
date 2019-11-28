@@ -2,34 +2,34 @@
 INSTALL_HOST="install.soton.ac.uk"
 BUILD_MOUNT="/mnt/build"
 
+function wait_for_network
+{
+	echo "[bonemeal] Waiting for network..."
+	# Attempt this up to 60 times (approximately 60-120 seconds)
+	for i in {1..60}; do
+		# Ping once, waiting up to one second
+		case "$(curl -s --max-time 2 -I http://$INSTALL_HOST | sed 's/^[^ ]*  *\([0-9]\).*/\1/; 1q')" in
+			[23]) break;;
+			*) sleep 1;;
+		esac
+	done
+}
+
 if [ -f /.bonemeal ]; then
 
 	## prevent logs from being printed on tty1
 	/bin/dmesg -n1
 
-	echo "[bonemeal] Waiting for network..."
+	echo "[bonemeal] Checking for network..."
 
-	# Attempt this up to 60 times (approximately 60-120 seconds)
-	for i in {1..60}; do
-		# Ping once, waiting up to one second
-		ping -q -c 1 -W 1 $INSTALL_HOST >/dev/null 2>/dev/null
-
-		# If the ping succeeded...
-		if [ "x$?" == "x0" ]; then
-			# Stop waiting
-			break
-		fi
-
-		# If the network is down, pinging will fail almost immediately, so sleep
-		sleep 1
-	done
+	case "$(curl -s --max-time 2 -I http://$INSTALL_HOST | sed 's/^[^ ]*  *\([0-9]\).*/\1/; 1q')" in
+		[23]) echo "[bonemeal] Newtwork is available";;
+		*) echo "[bonemeal] Network is down or very slow"; wait_for_network;;
+	esac
 
 	# Even if the above fails, try to update the installer anyway
 	echo "[bonemeal] Updating installer from $INSTALL_HOST..."
-	mkdir -p $BUILD_MOUNT
-	mount -o nolock $INSTALL_HOST:/data/bonemeal $BUILD_MOUNT
-	cp $BUILD_MOUNT/bonemeal.server /sbin/soton-setup-run
-	umount $BUILD_MOUNT
+	wget --quiet http://${INSTALL_HOST}/bonemeal/bonemeal.server -O /sbin/soton-setup-run
 	chmod 0755 /sbin/soton-setup-run
 
 	/sbin/soton-setup-run
