@@ -29,7 +29,13 @@ if [ -f /.bonemeal ]; then
 
 	# Even if the above fails, try to update the installer anyway
 	echo "[bonemeal] Updating installer from $INSTALL_HOST..."
-	wget --quiet http://${INSTALL_HOST}/bonemeal/bonemeal.server -O /sbin/soton-setup-run
+	# If we are on RHEL 8 get the Python 3 installer
+	if grep -Fq "Ootpa" /etc/redhat-release; then
+		echo "[bonemeal] Detected RHEL 8 using Python 3 installer..."
+		wget --quiet http://${INSTALL_HOST}/bonemeal/bonemeal3.server -O /sbin/soton-setup-run
+	else
+		wget --quiet http://${INSTALL_HOST}/bonemeal/bonemeal.server -O /sbin/soton-setup-run
+	fi
 	chmod 0755 /sbin/soton-setup-run
 
 	/sbin/soton-setup-run
