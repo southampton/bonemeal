@@ -1,25 +1,30 @@
-#!/usr/bin/python3
+#!/usr/bin/env python
 
 CONFIG_FILE = '/etc/bonemeal.conf'
 
 ## DO NOT EDIT BELOW THIS LINE #################################################
 
-import urwid      # the text-mode UI toolkit bonemeal uses
-import platform   # for get hostname and configure
-import os         # for get network interfaces
-import os.path    # for install section
-import socket     # for get ip from hostname
-import subprocess # for sysexec
-import requests   # for auth/register
-import logging    # for logging during installation
-import time       # for pausing at startup to avoid nasty boot messages
+import urwid                             # the text-mode UI toolkit bonemeal uses
+import platform                          # for get hostname and configure
+import os                                # for get network interfaces
+import os.path                           # for install section
+import socket                            # for get ip from hostname
+import subprocess                        # for sysexec
+import requests                          # for auth/register
+import logging                           # for logging during installation
+import time                              # for pausing at startup to avoid nasty boot messages
 from netaddr import IPAddress, IPNetwork # for network configuration
-import configparser # for config
-import traceback   # for exception handling
+import traceback                         # for exception handling
 import sys
 import termios
 import dmidecode
 import shutil
+
+# To support Python 2 / 3
+if sys.version_info.major >= 3:
+	import configparser                 # for config
+else:
+	import ConfigParser as configparser # for config
 
 ## NETWORK CONFIGS
 NETWORKS_LIST = [
@@ -96,6 +101,7 @@ class Bonemeal:
 		'satellite6'        : False, # if false, assumes you have Satellite 5 rather than 6.
 		'satellite_org'     : '',    # only used for Satellite 6
 		'skip_puppet'       : False, # if true, Puppet steps are skipped - allows for building Puppet servers
+		'data_disk'         : '/dev/sdb',
 		'post_install'      : None,
 		'post_install_args' : "",
 	}
@@ -662,7 +668,9 @@ class Bonemeal:
 			try:
 				# this is not...a very good way to getting the UUID. It works on current VMs but might not work in future.
 				# really it should be parsing the values and checking dmi_types and such. oh well...
-				u = dmidecode.system().values()[1]['data']['UUID']
+				u = list(dmidecode.system().values())[1]['data']['UUID']
+				if sys.version_info.major >= 3 and type(u) == bytes:
+					u = u.decode('utf-8')
 
 				# VMware changed the UUID order in VMHW13 :(
 				self.vmuuid = u[6:8] + u[4:6] + u[2:4] + u[0:2] + '-' + u[11:13] + u[9:11] + '-' + u[16:18] + u[14:16] + '-' + u[19:]
@@ -1119,12 +1127,12 @@ nameserver 152.78.111.113
 
 		if self.fromTemplate:
 			# Check that a second disk exists
-			if os.path.exists('/dev/sdb'):
+			if os.path.exists(self.config['data_disk']):
 				# Log
 				self.add_msg("Disks: Found a second disk, checking for LVM")
 
 				# If it exists, check for an existing LVM PV
-				(code, stdout, stderr) = self.sysexec(["/sbin/pvdisplay", "/dev/sdb"])
+				(code, stdout, stderr) = self.sysexec(["/sbin/pvdisplay", self.config['data_disk']])
 
 				# If the exist code is non-zero, assume that it does not exist, and go
 				# ahead and create it. Any of this failing is fatal otherwise Puppet could
@@ -1132,15 +1140,15 @@ nameserver 152.78.111.113
 				if code != 0:
 					# We need to create a n LVM physical volume
 					self.add_msg("Disks: No LVM PV found, creating PV")
-					(code, stdout, stderr) = self.sysexec(["/sbin/pvcreate", "-y", "/dev/sdb"])
+					(code, stdout, stderr) = self.sysexec(["/sbin/pvcreate", "-y", self.config['data_disk']])
 
 					if code != 0:
-						self.fatal("Failed to create LVM physical volume on /dev/sdb: \n" + stdout + "\n" + stderr)
+						self.fatal("Failed to create LVM physical volume on " + self.config['data_disk'] + ": \n" + stdout + "\n" + stderr)
 						return
 
 					# pvcreate succeeded, create a volume group
 					self.add_msg("Disks: Physical volume created. Creating volume group")
-					(code, stdout, stderr) = self.sysexec(["/sbin/vgcreate", "-y", "datavg", "/dev/sdb"])
+					(code, stdout, stderr) = self.sysexec(["/sbin/vgcreate", "-y", "datavg", self.config['data_disk']])
 
 					if code != 0:
 						self.fatal("Failed to create LVM logical volume: \n" + stdout + "\n" + stderr)
@@ -1186,7 +1194,7 @@ nameserver 152.78.111.113
 						self.fatal("Failed to mount /srv filesystem: \n" + stdout + "\n" + stderr)
 						return
 				else:
-					self.add_msg("Disks: No second disk detected at /dev/sdb - skipping")
+					self.add_msg("Disks: No second disk detected at " + self.config['data_disk'] + " - skipping")
 
 		# fstab updated, create symlink from /data -> /srv (we do this
 		# regardless of whether a second disk exists or coming from a
@@ -1476,7 +1484,7 @@ nameserver 152.78.111.113
 
 		if distid == 'Ootpa':
 			self.release = 8
-			self.ident = 'el8s'
+			self.ident = 'el8'
 			self.log.info("Detected operating system as RHEL8: " + distname + " " + distversion + " " + distid)
 			return True
 		elif distid == 'Maipo':
