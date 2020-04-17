@@ -1006,17 +1006,6 @@ nameserver 152.78.111.113
 			else:
 				self.add_msg("Satellite: Satellite Tools repo enabled")
 
-			## katello-agent rpm will already be installed in the template
-			if not self.fromTemplate:
-				self.add_msg("Satellite: Installing katello-agent")
-				(code, stdout, stderr) = self.sysexec(["/usr/bin/yum", "-y", "install", "katello-agent"])
-
-				if code != 0:
-					self.fatal("Satellite: Could not install katello-agent: \n" + stdout + "\n" + stderr)
-					return
-				else:
-					self.add_msg("Satellite: Installed katello-agent")
-
 		else:
 
 			## SATELLITE 5
