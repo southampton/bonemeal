@@ -6,11 +6,40 @@ if [[ "x$(id -u)" != "x0" ]]; then
 	exit 1;
 fi
 
-# Prompt user
-echo "This will prepare the system as a template and power it off"
-read -p "Are you sure you want to do this? " -r
-if [[ $REPLY =~ ^[Yy]([Ee][Ss])?$ ]]; then
+FORCE=false
+AUTOMATED=false
+RUN_TPREP=false
+
+# Process Options
+while getopts ":fa" opt; do
+	case ${opt} in
+		f )
+			FORCE=true
+			RUN_TPREP=true
+		;;
+		a )
+			AUTOMATED=true
+		;;
+		\? ) echo "Usage: tprep [-f] [-a]"
+		;;
+	esac
+done
+	  
+if [ "$FORCE" = false ]; then
+	# Prompt user
+	echo "This will prepare the system as a template and power it off"
+	read -p "Are you sure you want to do this? " -r
+	if [[ $REPLY =~ ^[Yy]([Ee][Ss])?$ ]]; then
+		RUN_TPREP=true
+	fi
+fi
+
+if [ "$RUN_TPREP" = true ]; then
 	echo "Preparing system for templatisation..."
+
+	echo " - Stopping rsyslog and auditd services"
+	/sbin/service rsyslog stop
+	/sbin/service auditd stop
 
 	echo " - Removing SSH host keys"
 	/bin/rm -f /etc/ssh/ssh_host_*
@@ -21,14 +50,19 @@ if [[ $REPLY =~ ^[Yy]([Ee][Ss])?$ ]]; then
 	echo " - Removing HWADDR and UUID settings from network config files"
 	/bin/sed -i '/^[ \t]*\(HWADDR\|UUID\)/d' /etc/sysconfig/network-scripts/ifcfg-eth*
 
-	echo " - Removing katello-ca-consumer-* package(s)"
-	/usr/bin/yum erase -y katello-ca-consumer-*
+	echo " - Removing iwl-* package(s)"
+	/usr/bin/yum erase -y iwl*
 
-	echo " - Cleaning up yum data"
-	/usr/bin/yum clean all
-
-	echo " - Cleaning up yum cache"
-	/bin/rm -rf /var/cache/yum
+	echo " - Removing yp-tools package"
+	/usr/bin/yum erase -y yp-tools*
+	
+	echo " - Cleaning old kernels"
+	if [ -x /bin/package-cleanup ]; then
+		/bin/package-cleanup -y --oldkernels --count=1
+	fi
+	if [ -x /bin/dnf ]; then
+		/bin/dnf -y remove --oldinstallonly --setopt installonly_limit=1
+	fi
 
 	echo " - Tidying up katello-agent cache"
 	/bin/rm -f /var/cache/katello-agent/enabled_repos.json
@@ -42,8 +76,25 @@ if [[ $REPLY =~ ^[Yy]([Ee][Ss])?$ ]]; then
 	echo " - Cleaning up katello facts"
 	/bin/rm -f /etc/rhsm/facts/katello.facts
 
+	echo " - Removing katello-ca-consumer-* package(s)"
+	/usr/bin/yum erase -y katello-ca-consumer-*
+
+	echo " - Cleaning up yum data"
+	/usr/bin/yum clean all
+
+	echo " - Cleaning up yum cache"
+	/bin/rm -rf /var/cache/yum
+
 	echo " - Removing Puppet SSL certificates"
 	/bin/rm -rf /etc/puppetlabs/puppet/ssl/
+
+	echo " - Removing keytab (if exists)"
+	if [ -f /etc/krb5.keytab ]; then
+		echo -e "\0005\0002\c" >/etc/krb5.keytab
+	fi
+
+	echo " - Force a log rotation"
+	/usr/sbin/logrotate -f /etc/logrotate.conf 
 
 	# Some of these are wrapped in if blocks to prevent accidentally
 	# creating files with potentially the wrong permissions
@@ -57,6 +108,13 @@ if [[ $REPLY =~ ^[Yy]([Ee][Ss])?$ ]]; then
 	if [ -f /var/log/wtmp ]; then
 		/bin/cat /dev/null > /var/log/wtmp
 	fi
+	if [ -f /var/log/lastlog ]; then
+		/bin/cat /dev/null > /var/log/lastlog
+	fi
+	if [ -f /var/log/grubby ]; then
+		/bin/cat /dev/null > /var/log/grubby
+	fi
+
 	/bin/rm -f /var/log/audit/audit.log.*
 	/bin/rm -f /var/log/messages-*
 	/bin/rm -f /var/log/maillog-*
@@ -65,16 +123,37 @@ if [[ $REPLY =~ ^[Yy]([Ee][Ss])?$ ]]; then
 	/bin/rm -f /var/log/secure-*
 	/bin/rm -f /var/log/yum-*
 	/bin/rm -f /var/log/up2date-*
+	/bin/rm -f /varlog/dmesg.old
+	/bin/rm -f /var/log/*-????????
+	/bin/rm -f /var/log/*.gz
+	/bin/rm -rf /var/log/anaconda
 	/bin/rm -f /root/bonemeal-installer.log
 	/bin/rm -f /root/anaconda-ks.cfg
 	/bin/rm -f /root/original-ks.cfg
 
 	echo " - Remove bash history for root"
+	unset HISTFILE
 	/bin/rm -f /root/.bash_history
+
+	echo " - Removing root's ssh directory"
+	/bin/rm -rf /root/.ssh
+
+	echo " - Removing user home directories"
+	/bin/rm -rf /home/*
 
 	echo " - Removing temporary files"
 	/bin/rm -rf /tmp/*
 	/bin/rm -rf /var/tmp/*
+
+	echo " - Removing enterprise CA certificates"
+	if [ -d /etc/tls ]; then
+		/bin/find /etc/tls -iname "entca*" | xargs -i@ rm -f @
+	fi
+
+	echo " - Removing list of users lectured by sudo"
+	if [ -d /var/db/sudo/lectured ]; then
+		/bin/rm -f /var/db/sudo/lectured/*
+	fi
 
 	echo " - Creating default /etc/hosts"
 	echo "127.0.0.1		localhost localhost.localdomain localhost4 localhost4.localdomain4" > /etc/hosts
@@ -83,17 +162,17 @@ if [[ $REPLY =~ ^[Yy]([Ee][Ss])?$ ]]; then
 	echo " - Removing dhclient exit hooks"
 	/bin/rm -f /etc/dhcp/dhclient-exit-hooks
 
-	echo " - Removing TSM configuration"
-	/bin/rm -f /opt/tivoli/tsm/client/ba/bin/dsm.opt
-	/bin/rm -f /opt/tivoli/tsm/client/ba/bin/dsm.sys
-
 	echo " - Creating bonemeal marker files"
 	/bin/touch /.bonemeal
 	/bin/touch /.bonemeal_template
 
 	echo
-	echo "Preparation complete. System will power off in five seconds."
-	echo "Press Ctrl+C to abort"
-
-	/bin/sleep 5 && /sbin/poweroff
+	
+	if [ "$AUTOMATED" = true ]; then
+		echo "Preparation complete. System will NOT power off due to automated install"
+	else
+		echo "Preparation complete. System will power off in five seconds."
+		echo "Press Ctrl+C to abort"
+		/bin/sleep 5 && /sbin/poweroff
+	fi
 fi
