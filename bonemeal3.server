@@ -1376,6 +1376,11 @@ nameserver 152.78.111.113
 					self.add_msg(stderr)
 					self.warnings = self.warnings + 1
 
+		if os.path.exists("/etc/dnf/modules.d"):
+			(code, stdout, stderr) = self.sysexec(["/sbin/restorecon", "-Rv", "/etc/dnf/modules.d"])
+			if code != 0:
+				self.add_msg("WARNING: Failed to run restorecon -Rv /etc/dnf/modules.d")	
+
 		## 9. POST-INSTALL SCRIPT ##############################################
 
 		# If we have a post-install script to call
