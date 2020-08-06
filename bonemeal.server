@@ -1,25 +1,31 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
 CONFIG_FILE = '/etc/bonemeal.conf'
 
 ## DO NOT EDIT BELOW THIS LINE #################################################
 
-import urwid      # the text-mode UI toolkit bonemeal uses
-import platform   # for get hostname and configure
-import os         # for get network interfaces
-import os.path    # for install section
-import socket     # for get ip from hostname
-import subprocess # for sysexec
-import requests   # for auth/register
-import logging    # for logging during installation
-import time       # for pausing at startup to avoid nasty boot messages
+import urwid                             # the text-mode UI toolkit bonemeal uses
+import platform                          # for get hostname and configure
+import os                                # for get network interfaces
+import os.path                           # for install section
+import socket                            # for get ip from hostname
+import subprocess                        # for sysexec
+import requests                          # for auth/register
+import logging                           # for logging during installation
+import time                              # for pausing at startup to avoid nasty boot messages
 from netaddr import IPAddress, IPNetwork # for network configuration
-import ConfigParser # for config
-import traceback   # for exception handling
+import traceback                         # for exception handling
 import sys
 import termios
 import dmidecode
 import shutil
+
+# To support Python 2 / 3
+PYTHON_VERSION_MAJOR = sys.version_info.major if not isinstance(sys.version_info, tuple) else sys.version_info[0]
+if PYTHON_VERSION_MAJOR >= 3:
+	import configparser                 # for config
+else:
+	import ConfigParser as configparser # for config
 
 ## NETWORK CONFIGS
 NETWORKS_LIST = [
@@ -79,25 +85,28 @@ ROUTERS6_MAP = {
 }
 
 class Bonemeal:
-	version       = '2019-11-12-01'
+	version       = '2020-06-30'
 
 	# [bonemeal]
 	config = {
-		'title'             : 'RHEL Server Setup',
-		'log_file'          : '/root/bonemeal-installer.log',
-		'puppet_ssldir'     : '/etc/puppetlabs/puppet/ssl/',
-		'puppet_binary'     : '/opt/puppetlabs/bin/puppet',
-		'puppet_master'     : 'puppet',
-		'skip_puppet'       : False, # if true, Puppet steps are skipped - allows for building Puppet servers
-		'cortex_url'        : 'https://cortex.domain.tld/',
-		'cortex_verify'     : False,
-		'skip_cortex'       : False, # if true, Cortex steps are skipped - allows for building without Cortex
-		'satellite_rpm'     : 'http://satellite.yourdomain.tld/pub/katello-ca-consumer-latest.noarch.rpm',
-		'satellite6'        : False, # if false, assumes you have Satellite 5 rather than 6.
-		'satellite_org'     : '',    # only used for Satellite 6
-		'skip_puppet'       : False, # if true, Puppet steps are skipped - allows for building Puppet servers
-		'post_install'      : None,
-		'post_install_args' : "",
+		'title'                : 'RHEL Server Setup',
+		'log_file'             : '/root/bonemeal-installer.log',
+		'puppet_ssldir'        : '/etc/puppetlabs/puppet/ssl/',
+		'puppet_binary'        : '/opt/puppetlabs/bin/puppet',
+		'puppet_master'        : 'puppet',
+		'skip_puppet'          : False, # if true, Puppet steps are skipped - allows for building Puppet servers
+		'cortex_url'           : 'https://cortex.domain.tld/',
+		'cortex_verify'        : False,
+		'skip_cortex'          : False, # if true, Cortex steps are skipped - allows for building without Cortex
+		'satellite_rpm'        : 'http://satellite.yourdomain.tld/pub/katello-ca-consumer-latest.noarch.rpm',
+		'satellite6'           : False, # if false, assumes you have Satellite 5 rather than 6.
+		'satellite_org'        : '',    # only used for Satellite 6
+		'skip_puppet'          : False, # if true, Puppet steps are skipped - allows for building Puppet servers
+		'swap_disk'            : None,  # if None, Cortex values will override this
+		'data_disk'            : None,  # if None, Cortex values will override this
+		'post_install'         : None,
+		'post_install_args'    : "",
+		'post_install_template': False
 	}
 
 	## colour setup
@@ -116,10 +125,10 @@ class Bonemeal:
 ################################################################################
 
 	def __init__(self):
-		print "[bonemeal] Launching installer..."
+		print("[bonemeal] Launching installer...")
 
 		# load configuration from file
-		configParser = ConfigParser.RawConfigParser()
+		configParser = configparser.RawConfigParser()
 
 		try:
 			configParser.readfp(open(CONFIG_FILE))
@@ -135,12 +144,12 @@ class Bonemeal:
 					self.config[option] = configParser.getboolean('bonemeal', option)
 				except ValueError as ex:
 					pass
-				except ConfigParser.NoOptionError as ex:
+				except configparser.NoOptionError as ex:
 					pass
 
 		except Exception as ex:
-			print "[bonemeal] Could not read from config file " + CONFIG_FILE + ": " + str(ex)
-			print "[bonemeal] Starting with default options"
+			print("[bonemeal] Could not read from config file " + CONFIG_FILE + ": " + str(ex))
+			print("[bonemeal] Starting with default options")
 
 		## Ensure the cortex url ends with a slash for us to add the method onto
 		if not self.config['cortex_url'].endswith('/'):
@@ -554,6 +563,10 @@ class Bonemeal:
 			if self.ecsStudentVM:
 				payload['ident'] = payload['ident'] + '-svm'
 
+			if not self.config['cortex_verify']:
+				import urllib3
+				urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 			r = requests.post(self.config['cortex_url'] + "api/register", data=payload, verify = self.config['cortex_verify'])
 		except Exception as ex:
 			self.log.error("error contacting registration server: " + type(ex).__name__ + ": " + str(ex))
@@ -662,7 +675,9 @@ class Bonemeal:
 			try:
 				# this is not...a very good way to getting the UUID. It works on current VMs but might not work in future.
 				# really it should be parsing the values and checking dmi_types and such. oh well...
-				u = dmidecode.system().values()[1]['data']['UUID']
+				u = list(dmidecode.system().values())[1]['data']['UUID']
+				if PYTHON_VERSION_MAJOR >= 3 and type(u) == bytes:
+					u = u.decode('utf-8')
 
 				# VMware changed the UUID order in VMHW13 :(
 				self.vmuuid = u[6:8] + u[4:6] + u[2:4] + u[0:2] + '-' + u[11:13] + u[9:11] + '-' + u[16:18] + u[14:16] + '-' + u[19:]
@@ -681,6 +696,11 @@ class Bonemeal:
 				# Update the OS identity for ECS student VMs
 				if self.ecsStudentVM:
 					payload['ident'] = payload['ident'] + '-svm'
+
+				if not self.config['cortex_verify']:
+					import urllib3
+					urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 
 				r = requests.post(self.config['cortex_url'] + "api/register", data=payload, verify = self.config['cortex_verify'])
 			except Exception as ex:
@@ -771,7 +791,7 @@ class Bonemeal:
 		## 1. HOSTNAME #########################################################
 
 		## RHEL7 hostname
-		if self.release == 7:
+		if self.release == 7 or self.release == 8:
 			(code, stdout, stderr) = self.sysexec(["/bin/hostnamectl","set-hostname",self.hostname])
 
 			if code != 0:
@@ -849,7 +869,7 @@ class Bonemeal:
 
 		## 3. NETWORK ##########################################################
 
-		## turn off network manager
+		## turn off network manager (rhel 6 / 7 only)
 		if not self.fromTemplate:
 			if self.release == 7:
 				self.add_msg("Network: Stopping NetworkManager")
@@ -990,7 +1010,7 @@ nameserver 152.78.111.113
 				self.add_msg("Satellite: Katello registration successful")
 
 			self.add_msg("Satellite: Enabling Satellite Tools repo")
-			(code, stdout, stderr) = self.sysexec(['/usr/sbin/subscription-manager', 'repos', '--enable=rhel-*-satellite-tools-*-rpms']) 
+			(code, stdout, stderr) = self.sysexec(['/usr/sbin/subscription-manager', 'repos', '--enable=*satellite-tools-*-rpms']) 
 
 			if code != 0:
 				self.fatal("Satellite: Could not enable Satellite Tools repo: \n" + stdout + "\n" + stderr)
@@ -1107,13 +1127,54 @@ nameserver 152.78.111.113
 		## 7. LVM SECOND DISK ##################################################
 
 		if self.fromTemplate:
-			# Check that a second disk exists
-			if os.path.exists('/dev/sdb'):
+			# Update disk paths from Cortex API
+			if self.config['swap_disk'] is None and self.cortex_data.get('swap_disk'):
+				self.add_msg("Disks: Using Cortex value for swap disk: " + self.cortex_data.get('swap_disk'))
+				self.config['swap_disk'] = self.cortex_data.get('swap_disk')
+			if self.config['data_disk'] is None and self.cortex_data.get('data_disk'):
+				self.add_msg("Disks: Using Cortex value for data disk: " + self.cortex_data.get('data_disk'))
+				self.config['data_disk'] = self.cortex_data.get('data_disk')
+
+			# Check that we want to create a swap disk
+			if self.config['swap_disk'] and os.path.exists(self.config['swap_disk']):
 				# Log
-				self.add_msg("Disks: Found a second disk, checking for LVM")
+				self.add_msg("Disks: Found a second swap disk, creating swap")
+
+				# Check /etc/fstab for 'LABEL=swap'
+				(code, stdout, stderr) = self.sysexec(["/bin/grep", "-Fq", "LABEL=swap", "/etc/fstab"])
+				if code != 0:
+					(code, stdout, stderr) = self.sysexec(["/sbin/mkswap", "-L", "swap", self.config['swap_disk']])
+					if code != 0:
+						self.fatal("Failed to mkswap on swap disk " + self.config['swap_disk'] + ": \n" + stdout + "\n" + stderr)
+						return
+
+					# Filesystem created, update fstab. Note that the newline at the end of the
+					# fstab append is required (at least in RHEL6, RHEL7 was less irritated by it)
+					self.add_msg("Disks: Swap disk created. Updating fstab")
+					try:
+						with open('/etc/fstab', 'a') as fp:
+							fp.write("\nLABEL=swap          swap           swap     defaults        0 0\n")
+					except Exception as e:
+						self.fatal("Failed to update fstab for swap disk: \n" + str(e))
+						return
+
+					# fstab updated, run swapon -a
+					self.add_msg("Disks: Swap created, running swapon")
+					(code, stdout, stderr) = self.sysexec(["/sbin/swapon", "-a"])
+
+					if code != 0:
+						self.fatal("Failed to run swapon -a: \n" + stdout + "\n" + stderr)
+						return
+				else:
+					self.add_msg("Disks: LABEL=swap already present in /etc/fstab, skipping swap initialisation")
+
+			# Check that a second disk exists
+			if os.path.exists(self.config['data_disk']):
+				# Log
+				self.add_msg("Disks: Found a second data disk, checking for LVM")
 
 				# If it exists, check for an existing LVM PV
-				(code, stdout, stderr) = self.sysexec(["/sbin/pvdisplay", "/dev/sdb"])
+				(code, stdout, stderr) = self.sysexec(["/sbin/pvdisplay", self.config['data_disk']])
 
 				# If the exist code is non-zero, assume that it does not exist, and go
 				# ahead and create it. Any of this failing is fatal otherwise Puppet could
@@ -1121,15 +1182,15 @@ nameserver 152.78.111.113
 				if code != 0:
 					# We need to create a n LVM physical volume
 					self.add_msg("Disks: No LVM PV found, creating PV")
-					(code, stdout, stderr) = self.sysexec(["/sbin/pvcreate", "-y", "/dev/sdb"])
+					(code, stdout, stderr) = self.sysexec(["/sbin/pvcreate", "-y", self.config['data_disk']])
 
 					if code != 0:
-						self.fatal("Failed to create LVM physical volume on /dev/sdb: \n" + stdout + "\n" + stderr)
+						self.fatal("Failed to create LVM physical volume on " + self.config['data_disk'] + ": \n" + stdout + "\n" + stderr)
 						return
 
 					# pvcreate succeeded, create a volume group
 					self.add_msg("Disks: Physical volume created. Creating volume group")
-					(code, stdout, stderr) = self.sysexec(["/sbin/vgcreate", "-y", "datavg", "/dev/sdb"])
+					(code, stdout, stderr) = self.sysexec(["/sbin/vgcreate", "-y", "datavg", self.config['data_disk']])
 
 					if code != 0:
 						self.fatal("Failed to create LVM logical volume: \n" + stdout + "\n" + stderr)
@@ -1147,7 +1208,7 @@ nameserver 152.78.111.113
 					self.add_msg("Disks: Logical volume creation complete. Creating filesystem")
 					if self.release == 6:
 						(code, stdout, stderr) = self.sysexec(["/sbin/mkfs.ext4", "-L", "data", "/dev/mapper/datavg-data"])
-					elif self.release == 7:
+					elif self.release == 7 or self.release == 8:
 						(code, stdout, stderr) = self.sysexec(["/sbin/mkfs.xfs", "-L", "data", "/dev/mapper/datavg-data"])
 
 					if code != 0:
@@ -1161,7 +1222,7 @@ nameserver 152.78.111.113
 						with open('/etc/fstab', 'a') as fp:
 							if self.release == 6:
 								fp.write("\nLABEL=data          /srv           ext4    defaults        0 0\n")
-							elif self.release == 7:
+							elif self.release == 7 or self.release == 8:
 								fp.write("\nLABEL=data          /srv           xfs     defaults        0 0\n")
 					except Exception as e:
 						self.fatal("Failed to update fstab: \n" + str(e))
@@ -1175,7 +1236,7 @@ nameserver 152.78.111.113
 						self.fatal("Failed to mount /srv filesystem: \n" + stdout + "\n" + stderr)
 						return
 				else:
-					self.add_msg("Disks: No second disk detected at /dev/sdb - skipping")
+					self.add_msg("Disks: No second disk detected at " + self.config['data_disk'] + " - skipping")
 
 		# fstab updated, create symlink from /data -> /srv (we do this
 		# regardless of whether a second disk exists or coming from a
@@ -1199,7 +1260,7 @@ nameserver 152.78.111.113
 		if not self.ecsStudentVM:
 			## templates will have puppet running, we want to stop that before we mess with puppet.
 			if self.fromTemplate:
-				if self.release == 7:
+				if self.release == 7 or self.release == 8:
 					self.add_msg("Puppet: Stopping agent")
 					(code, stdout, stderr) = self.sysexec(["/bin/systemctl","stop","puppet"])
 
@@ -1297,7 +1358,7 @@ nameserver 152.78.111.113
 
 			## Set Puppet to run all the time
 			self.add_msg("Puppet: Enabling on startup")
-			if self.release == 7:
+			if self.release == 7 or self.release == 8:
 				(code, stdout, stderr) = self.sysexec(["/bin/systemctl","enable","puppet"])
 
 				if code != 0:
@@ -1314,6 +1375,11 @@ nameserver 152.78.111.113
 					self.add_msg(stdout)
 					self.add_msg(stderr)
 					self.warnings = self.warnings + 1
+
+		if os.path.exists("/etc/dnf/modules.d"):
+			(code, stdout, stderr) = self.sysexec(["/sbin/restorecon", "-Rv", "/etc/dnf/modules.d"])
+			if code != 0:
+				self.add_msg("WARNING: Failed to run restorecon -Rv /etc/dnf/modules.d")	
 
 		## 9. POST-INSTALL SCRIPT ##############################################
 
@@ -1347,12 +1413,34 @@ nameserver 152.78.111.113
 					self.add_msg(stderr)
 					self.warnings = self.warnings + 1
 
+
+		## 10. TEMPLATE VM SCRIPT ##############################################
+
+		## Cortex provided value can override Bonemeal config
+		if "post_install_template" in self.cortex_data and self.cortex_data["post_install_template"] is not None:
+			self.config["post_install_template"] = self.cortex_data["post_install_template"]
+		## Steps to run if we want to make a template
+		if self.config["post_install_template"]:
+			## run tprep
+			self.add_msg("Template: Running /sbin/tprep")
+			(code, stdout, stderr) = self.sysexec(["/sbin/tprep", "-f", "-a"])
+
+			if code != 0:
+				self.fatal("Failed when running tprep:\n" + stdout + "\n" + stderr)
+		else:
+			self.add_msg("Template: Skipping")
+
 		## END: NOTIFY CORTEX OR USER ##########################################
 
 		if self.fromTemplate:
 			## update the server to say we're done installing
 			try:
 				payload = {'uuid': self.vmuuid, 'warnings': self.warnings}
+
+				if not self.config['cortex_verify']:
+					import urllib3
+					urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 				r = requests.post(self.config['cortex_url'] + "api/installer/notify", data=payload, verify = self.config['cortex_verify'])
 
 				if r.status_code != 200:
@@ -1415,18 +1503,22 @@ nameserver 152.78.111.113
 
 	def exit_installer(self):
 		## Mark bonemeal as not starting at reboot
-		os.unlink('/.bonemeal')
+		if not self.config["post_install_template"]:
+			os.unlink('/.bonemeal')
 
 		## Delete the template marker file too, if appropriate
-		if self.fromTemplate:
+		if self.fromTemplate and not self.config["post_install_template"]:
 			os.unlink('/.bonemeal_template')
 
 		## Delete the ECS student VM marker file too, if appropriate
-		if self.ecsStudentVM:
+		if self.ecsStudentVM and not self.config["post_install_template"]:
 			os.unlink('/.bonemeal_svm')
 
-		## reboot
-		self.sysexec("/sbin/reboot")
+		## poweroff / reboot
+		if self.config["post_install_template"]:
+			self.sysexec("/sbin/poweroff")
+		else:
+			self.sysexec("/sbin/reboot")
 
 		## exit (We probably never get this far)
 		raise urwid.ExitMainLoop()
@@ -1463,7 +1555,12 @@ nameserver 152.78.111.113
 		## work out OS version
 		(distname, distversion, distid) = platform.linux_distribution()
 
-		if distid == 'Maipo':
+		if distid == 'Ootpa':
+			self.release = 8
+			self.ident = 'el8'
+			self.log.info("Detected operating system as RHEL8: " + distname + " " + distversion + " " + distid)
+			return True
+		elif distid == 'Maipo':
 			self.release = 7
 			self.ident   = 'el7s'
 			self.log.info("Detected operating system as RHEL7: " + distname + " " + distversion + " " + distid)
@@ -1486,9 +1583,9 @@ if '__main__' == __name__:
 	try:
 		Bonemeal()
 		subprocess.call(["reset"])
-	except Exception as ex:
-		print "--------------------------------------------------------------------------------"
-		print "A critical error occured in bonemeal! Details will be shown below for 5 minutes: \n"
-		traceback.print_exc()
-		print "--------------------------------------------------------------------------------"
+	except Exception:
+		print("--------------------------------------------------------------------------------")
+		print("A critical error occured in bonemeal! Details will be shown below for 5 minutes: \n")
+		traceback.print_exc(file=sys.stderr)
+		print("--------------------------------------------------------------------------------")
 		time.sleep(300)
