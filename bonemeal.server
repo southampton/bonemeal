@@ -87,7 +87,7 @@ ROUTERS6_MAP = {
 }
 
 class Bonemeal:
-	version       = '2020-06-30'
+	version       = '2020-08-14'
 
 	# [bonemeal]
 	config = {
@@ -1171,7 +1171,7 @@ nameserver 152.78.111.113
 					self.add_msg("Disks: LABEL=swap already present in /etc/fstab, skipping swap initialisation")
 
 			# Check that a second disk exists
-			if os.path.exists(self.config['data_disk']):
+			if self.config['data_disk'] and os.path.exists(self.config['data_disk']):
 				# Log
 				self.add_msg("Disks: Found a second data disk, checking for LVM")
 
